@@ -9,11 +9,11 @@ TARGET ?= OSX
 
 MENU_BASE_DIR = ..
 
-MENU = tea
+MENU = tea latte coffee mocha
 MENU_FOLDERS = $(MENU:%=$(MENU_BASE_DIR)/%/)
 MENU_FILES = $(join $(MENU_FOLDERS),$(MENU))
 
-INCLUDE = -I. -Iexternal -Iexternal/lua/src -Imenu/mocha/external
+INCLUDE = -I. -Iexternal -Iexternal/lua/src -I$(MENU_BASE_DIR)/mocha/external
 INCLUDE += $(addprefix -I,$(MENU_FOLDERS))
 
 SRC = cafe.c $(MENU_FILES:%=%.c)

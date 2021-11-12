@@ -31,14 +31,46 @@ const char *frag_shader =
 "  gl_FragColor = v_Color;\n"
 "}\n";
 
+struct ca_Shader {
+    te_shader_t handle;
+    ca_i32 world_loc;
+    ca_i32 modelview_loc;
+};
 
 struct ca_Texture {
     te_texture_t handle;
 };
 
+struct ca_Batch {
+    ca_Texture *texture;
+    te_vao_t *vao;
+    te_buffer_t *vbo;
+
+    ca_i32 start_index, num_vertices;
+};
+
+struct ca_DrawCall {
+    ca_Shader *shader;
+    ca_Camera *camera;
+    ca_Texture *target;
+    ca_Batch *batch;
+};
+
 struct ca_Render {
-    struct {} defaults;
-    struct {} state;
+    struct {
+        ca_Texture *white_texture;
+        ca_Texture *target_texture;
+        ca_Shader *shader;
+    } defaults;
+
+    struct {
+        ca_i32 mode;
+        ca_Shader *shader;
+        ca_Texture *texture;
+        ca_Texture *target;
+        ca_Camera *camera;
+        ca_Batch *batch;
+    } state;
 };
 
 struct ca_Input {
@@ -101,6 +133,8 @@ ca_bool cafe_open(ca_Config* config) {
     te_config_t tea_conf = tea_config();
     tea_init(&tea_conf);
     cafe()->input.keys = SDL_GetKeyboardState(NULL);
+    cafe()->render.defaults.shader = cafe_render_createShader(vert_shader, frag_shader);
+    cafe()->render.state.shader = cafe()->render.defaults.shader;
     return CA_TRUE;
 }
 
@@ -126,8 +160,24 @@ void cafe_begin() {
     }
     tea_clear_color(.3f, .4f, .4f, 1.f);
     tea_clear();
+    ca_i32 width, height;
+    SDL_GetWindowSize(cafe()->window, &width, &height);
+    tea_viewport(0, 0, width, height);
+    tea_matrix_mode(TEA_PROJECTION);
+    tea_load_identity();
+    tea_ortho(0, width, height, 0, -1, 1);
+    tea_matrix_mode(TEA_MODELVIEW);
+    tea_load_identity();
+
+    ca_Shader *shader = cafe()->render.state.shader;
+    tea_use_shader(shader->handle);
+    tea_uniform_matrix4fv(shader->world_loc, 1, CA_FALSE, tea_get_matrix(TEA_PROJECTION));
+    tea_uniform_matrix4fv(shader->modelview_loc, 1, CA_FALSE, tea_get_matrix(TEA_MODELVIEW));
+    tea_begin(TEA_TRIANGLES);
 }
 void cafe_end() {
+    tea_end();
+    tea_use_shader(0);
     SDL_GL_SwapWindow(cafe()->window);
 }
 
@@ -202,4 +252,36 @@ ca_bool cafe_mouse_wasPressed(ca_i32 button) {
 
 ca_bool cafe_mouse_wasReleased(ca_i32 button) {
     return CA_TRUE;
+}
+
+/*=====================*
+ * RENDER FUNCTIONS    *
+ *=====================*/
+
+ca_i32 cafe_render_mode(ca_i32 mode) {
+    ca_i32 old_mode = cafe()->render.state.mode;
+    cafe()->render.state.mode = mode;
+    return old_mode;
+}
+
+/*****************
+ * Shader       *
+ ****************/
+
+ca_Shader* cafe_render_createShader(const char* vert, const char* frag) {
+    TEA_ASSERT(vert != NULL, "Vertex shader source is null");
+    TEA_ASSERT(frag != NULL, "Fragment shader source is null");
+
+    ca_Shader* shader = malloc(sizeof(ca_Shader));
+    memset(shader, 0, sizeof(ca_Shader));
+    shader->handle = tea_shader(vert, frag);
+    shader->world_loc = tea_get_uniform_location(shader->handle, "u_World");
+    shader->modelview_loc = tea_get_uniform_location(shader->handle, "u_ModelView");
+    return shader;
+}
+
+void cafe_shader_destroy(ca_Shader *shader) {
+    if (!shader) return;
+    tea_free_shader(shader->handle);
+    free(shader);
 }

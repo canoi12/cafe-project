@@ -413,6 +413,7 @@ typedef struct ca_Batch ca_Batch;
 typedef struct ca_Texture ca_Texture;
 typedef struct ca_Font ca_Font;
 typedef struct ca_Shader ca_Shader;
+typedef struct ca_Camera ca_Camera;
 
 typedef struct ca_Sound ca_Sound;
 typedef struct ca_Music ca_Music;

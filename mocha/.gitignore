@@ -1,0 +1,8 @@
+.vscode
+.clangd
+mocha
+*.o
+*.a
+*.so
+/hello
+compile_commands.json

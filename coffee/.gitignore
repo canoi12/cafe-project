@@ -1,0 +1,11 @@
+.vscode
+coffee
+obj/
+bin/
+lib/
+*.o
+*.a
+*.so
+*.sublime-*
+*.swp
+*.bkp

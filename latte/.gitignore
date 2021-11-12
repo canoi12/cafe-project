@@ -1,0 +1,7 @@
+latte
+*.txt
+*.a
+*.o
+*.do
+.clangd
+compile_commands.json

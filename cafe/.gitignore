@@ -1,0 +1,10 @@
+cafe 
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+*.wasm
+*.html
+*.js
+*.dSYM

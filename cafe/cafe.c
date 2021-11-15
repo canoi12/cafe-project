@@ -8,6 +8,8 @@
 #include <SDL2/SDL_opengl.h>
 
 #define cafe() (&_cafe_ctx)
+#define render() (&cafe()->render)
+#define input() (&cafe()->input)
 
 typedef SDL_Window ca_Window;
 typedef SDL_Event ca_Event;
@@ -75,6 +77,10 @@ struct ca_Render {
 
 struct ca_Input {
     const Uint8 *keys;
+    struct {
+	Uint8 down[3];
+	Uint8 pressed[3];
+    } mouse;
 };
 
 struct Cafe {
@@ -82,14 +88,7 @@ struct Cafe {
     SDL_GLContext context;
     ca_Event event;
     struct ca_Render render;
-
-    struct {
-        const Uint8 *keys;
-        struct {
-            ca_bool down[3];
-            ca_bool pressed[3];
-        } mouse;
-    } input;
+    struct ca_Input input;
 };
 
 static Cafe _cafe_ctx;
@@ -285,3 +284,45 @@ void cafe_shader_destroy(ca_Shader *shader) {
     tea_free_shader(shader->handle);
     free(shader);
 }
+
+void cafe_shader_setUniform1f(ca_Shader *shader, const char *name, ca_f32 value) {
+    if (!shader)
+	return;
+    int loc = tea_get_uniform_location(shader->handle, name);
+    te_shader_t current = cafe()->render.state.shader ? cafe()->render.state.shader->handle : 0;
+    tea_use_shader(shader->handle);
+    tea_uniform1f(loc, value);
+    tea_use_shader(current);
+}
+
+void cafe_shader_setUniform2f(ca_Shader *shader, const char *name, ca_f32 v0, ca_f32 v1) {
+    if (!shader)
+	return;
+    int loc = tea_get_uniform_location(shader->handle, name);
+    te_shader_t current = render()->state.shader ? render()->state.shader->handle : 0;
+    tea_use_shader(shader->handle);
+    tea_uniform2f(loc, v0, v1);
+    tea_use_shader(current);
+
+}
+
+void cafe_shader_setUniform3f(ca_Shader *shader, const char *name, ca_f32 v0, ca_f32 v1, ca_f32 v2) {
+    if (!shader)
+	return;
+    int loc = tea_get_uniform_location(shader->handle, name);
+    te_shader_t current = render()->state.shader ? render()->state.shader->handle : 0;
+    tea_use_shader(shader->handle);
+    tea_uniform3f(loc, v0, v1, v2);
+    tea_use_shader(current);
+}
+
+void cafe_shader_setUniform4f(ca_Shader *shader, const char *name, ca_f32 v0, ca_f32 v1, ca_f32 v2, ca_f32 v3) {
+    if (!shader)
+	return;
+    int loc = tea_get_uniform_location(shader->handle, name);
+    te_shader_t current = render()->state.shader ? render()->state.shader->handle : 0;
+    tea_use_shader(shader->handle);
+    tea_uniform4f(loc, v0, v1, v2, v3);
+    tea_use_shader(current);
+}
+

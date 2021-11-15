@@ -26,9 +26,21 @@ SLIBNAME = $(LIBNAME).a
 DLIBNAME = $(LIBNAME).so
 
 #include cross/Makefile.$(TARGET)
-LDFLAGS += -framework OpenGL -lSDL2
+ifeq ($(OS),Windows_NT)
+        CFLAGS += -D_WIN32
+        LDFLAGS += -mwindows -lopengl32
+else
+        UNAME_S = $(shell uname -s)
+        ifeq ($(UNAME_S),Darwin)
+                LDFLAGS += -framework OpenGL
+        endif
+        ifeq ($(UNAME_S),Linux)
+                LDFLAGS += -lGL
+        endif
+endif
 
 LDFLAGS += -L. -lcafe
+LDFLAGS += -lm -lSDL2 -ldl
 
 .PHONY: all build
 

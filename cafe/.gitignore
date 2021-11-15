@@ -8,3 +8,4 @@ cafe
 *.html
 *.js
 *.dSYM
+compile_commands.json

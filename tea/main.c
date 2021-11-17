@@ -16,7 +16,6 @@ const char *vert =
 
 const char *frag =
 "#version 120\n"
-//"precision mediump float;\n"
 "varying vec4 fragColor;\n"
 "void main() {\n"
 "    gl_FragColor = fragColor;\n"

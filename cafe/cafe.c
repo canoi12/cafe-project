@@ -18,12 +18,12 @@ const char *vert_shader =
 "#version 120\n"
 "uniform mat4 u_World;\n"
 "uniform mat4 u_ModelView;\n"
-"attribute vec4 a_Position;\n"
+"attribute vec3 a_Position;\n"
 "attribute vec4 a_Color;\n"
 "varying vec4 v_Color;\n"
 "void main() {\n"
 "  v_Color = a_Color;\n"
-"  gl_Position = u_ModelView * u_World * a_Position;\n"
+"  gl_Position = u_ModelView * u_World * vec4(a_Position, 1.0);\n"
 "}\n";
 
 const char *frag_shader =
@@ -51,11 +51,14 @@ struct ca_Batch {
     ca_i32 start_index, num_vertices;
 };
 
+typedef struct ca_DrawCall ca_DrawCall;
 struct ca_DrawCall {
     ca_Shader *shader;
     ca_Camera *camera;
     ca_Texture *target;
     ca_Batch *batch;
+
+    ca_DrawCall *next;
 };
 
 struct ca_Render {
@@ -261,6 +264,10 @@ ca_i32 cafe_render_mode(ca_i32 mode) {
     ca_i32 old_mode = cafe()->render.state.mode;
     cafe()->render.state.mode = mode;
     return old_mode;
+}
+
+void cafe_render_setShader(ca_Shader* shader) {
+    cafe()->render.state.shader = shader ? shader : cafe()->render.defaults.shader;
 }
 
 /*****************

@@ -7,6 +7,15 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
+#define PROJECTION_UNIFORM_NAME "u_World"
+#define MODELVIEW_UNIFORM_NAME "u_ModelView" 
+
+#define POSITION_ATTRIBUTE_NAME "a_Position"
+#define COLOR_ATTRIBUTE_NAME "a_Color"
+#define TEXCOORD_ATTRIBUTE_NAME "a_TexCoord"
+
+#define MAX_DRAW_CALLS 1024
+
 #define cafe() (&_cafe_ctx)
 #define render() (&cafe()->render)
 #define input() (&cafe()->input)
@@ -14,29 +23,68 @@
 typedef SDL_Window ca_Window;
 typedef SDL_Event ca_Event;
 
-const char *vert_shader =
+static const char *_150_vert_header =
+"#version 150\n"
+"uniform mat4 u_World;\n"
+"uniform mat4 u_ModelView;\n"
+"in vec3 a_Position;\n"
+"in vec4 a_Color;\n"
+"in vec2 a_TexCoord;\n"
+"out vec4 v_Color;\n"
+"out vec2 v_TexCoord;\n";
+
+static const char *_150_frag_header =
+"#version 150\n"
+"in vec4 v_Color;\n"
+"in vec2 v_TexCoord;\n"
+"uniform sampler2D u_Texture;\n"
+"out vec4 o_FragColor;\n";
+
+static const char *_120_vert_header =
 "#version 120\n"
 "uniform mat4 u_World;\n"
 "uniform mat4 u_ModelView;\n"
 "attribute vec3 a_Position;\n"
 "attribute vec4 a_Color;\n"
+"attribute vec2 a_TexCoord;\n"
 "varying vec4 v_Color;\n"
-"void main() {\n"
-"  v_Color = a_Color;\n"
-"  gl_Position = u_ModelView * u_World * vec4(a_Position, 1.0);\n"
-"}\n";
+"varying vec2 v_TexCoord;\n";
 
-const char *frag_shader =
+static const char *_120_frag_header =
 "#version 120\n"
 "varying vec4 v_Color;\n"
+"varying vec2 v_TexCoord;\n"
+"uniform sampler2D u_Texture;\n"
+"#define o_FragColor gl_FragColor\n"
+"#define texture texture2D\n";
+
+static const char *_default_vert_function =
+"vec4 position(mat4 model_view, mat4 world, vec3 pos) {\n"
+"  return model_view * world * vec4(pos, 1.0);\n"
+"}\n";
+
+static const char *_default_frag_function =
+"vec4 pixel(vec4 color, vec2 tex_coord, sampler2D tex) {\n"
+"  return color * texture(tex, tex_coord);\n"
+"}\n";
+
+static const char *_vert_main =
 "void main() {\n"
-"  gl_FragColor = v_Color;\n"
+"  v_Color = a_Color;\n"
+"  v_TexCoord = a_TexCoord;\n"
+"  gl_Position = position(u_ModelView, u_World, a_Position);\n"
+"}\n";
+
+static const char *_frag_main =
+"void main() {\n"
+"  o_FragColor = pixel(v_Color, v_TexCoord, u_Texture);\n"
 "}\n";
 
 struct ca_Shader {
     te_shader_t handle;
     ca_i32 world_loc;
     ca_i32 modelview_loc;
+    ca_i32 texture_loc;
 };
 
 struct ca_Texture {
@@ -46,19 +94,19 @@ struct ca_Texture {
 struct ca_Batch {
     ca_Texture *texture;
     te_vao_t *vao;
-    te_buffer_t *vbo;
+    te_buffer_t *vbo, *ibo;
 
     ca_i32 start_index, num_vertices;
 };
 
 typedef struct ca_DrawCall ca_DrawCall;
 struct ca_DrawCall {
+    ca_i32 mode;
+    ca_Color clear_color;
     ca_Shader *shader;
     ca_Camera *camera;
     ca_Texture *target;
     ca_Batch *batch;
-
-    ca_DrawCall *next;
 };
 
 struct ca_Render {
@@ -68,14 +116,13 @@ struct ca_Render {
         ca_Shader *shader;
     } defaults;
 
-    struct {
-        ca_i32 mode;
-        ca_Shader *shader;
-        ca_Texture *texture;
-        ca_Texture *target;
-        ca_Camera *camera;
-        ca_Batch *batch;
-    } state;
+    ca_DrawCall *draw_calls;
+    ca_i32 max_draw_calls;
+    ca_i32 draw_call_index;
+
+    ca_DrawCall *current_draw_call;
+
+    ca_DrawCall draw_call;
 };
 
 struct ca_Input {
@@ -116,8 +163,8 @@ ca_bool cafe_open(ca_Config* config) {
     }
 
     cafe()->window = SDL_CreateWindow(config->window.title,
-                                      SDL_WINDOWPOS_UNDEFINED,
-                                      SDL_WINDOWPOS_UNDEFINED,
+                                      SDL_WINDOWPOS_CENTERED,
+                                      SDL_WINDOWPOS_CENTERED,
                                       config->window.width,
                                       config->window.height,
                                       config->window.flags);
@@ -135,8 +182,11 @@ ca_bool cafe_open(ca_Config* config) {
     te_config_t tea_conf = tea_config();
     tea_init(&tea_conf);
     cafe()->input.keys = SDL_GetKeyboardState(NULL);
-    cafe()->render.defaults.shader = cafe_render_createShader(vert_shader, frag_shader);
-    cafe()->render.state.shader = cafe()->render.defaults.shader;
+    cafe()->render.defaults.shader = cafe_render_createShader(NULL, NULL);
+    render()->draw_calls = malloc(sizeof(ca_DrawCall) * MAX_DRAW_CALLS);
+    render()->max_draw_calls = MAX_DRAW_CALLS;
+    render()->draw_call_index = 0;
+    render()->current_draw_call = render()->draw_calls;
     return CA_TRUE;
 }
 
@@ -171,13 +221,18 @@ void cafe_begin() {
     tea_matrix_mode(TEA_MODELVIEW);
     tea_load_identity();
 
-    ca_Shader *shader = cafe()->render.state.shader;
+    // ca_Shader *shader = cafe()->render.state.shader;
+    ca_Shader *shader = render()->current_draw_call->shader;
     tea_use_shader(shader->handle);
     tea_uniform_matrix4fv(shader->world_loc, 1, CA_FALSE, tea_get_matrix(TEA_PROJECTION));
     tea_uniform_matrix4fv(shader->modelview_loc, 1, CA_FALSE, tea_get_matrix(TEA_MODELVIEW));
     tea_begin(TEA_TRIANGLES);
 }
 void cafe_end() {
+    ca_Shader *shader = render()->draw_call.shader;
+    tea_use_shader(shader->handle);
+    tea_uniform_matrix4fv(shader->world_loc, 1, CA_FALSE, tea_get_matrix(TEA_PROJECTION));
+    tea_uniform_matrix4fv(shader->modelview_loc, 1, CA_FALSE, tea_get_matrix(TEA_MODELVIEW));
     tea_end();
     tea_use_shader(0);
     SDL_GL_SwapWindow(cafe()->window);
@@ -260,6 +315,16 @@ ca_bool cafe_mouse_wasReleased(ca_i32 button) {
  * RENDER FUNCTIONS    *
  *=====================*/
 
+void cafe_render_begin(void) {
+    te_uint draw_mode = render()->draw_call.mode == CA_FILL ? TEA_TRIANGLES : TEA_LINES;
+    tea_begin(draw_mode);
+}
+
+void cafe_render_end(void) {
+    tea_end();
+}
+
+
 ca_i32 cafe_render_mode(ca_i32 mode) {
     ca_i32 old_mode = cafe()->render.state.mode;
     cafe()->render.state.mode = mode;
@@ -275,14 +340,34 @@ void cafe_render_setShader(ca_Shader* shader) {
  ****************/
 
 ca_Shader* cafe_render_createShader(const char* vert, const char* frag) {
-    TEA_ASSERT(vert != NULL, "Vertex shader source is null");
-    TEA_ASSERT(frag != NULL, "Fragment shader source is null");
+    vert = vert ? vert : _default_vert_function;
+    frag = frag ? frag : _default_frag_function;
 
     ca_Shader* shader = malloc(sizeof(ca_Shader));
     memset(shader, 0, sizeof(ca_Shader));
-    shader->handle = tea_shader(vert, frag);
+    const char *vert_shader_strs[] = { _120_vert_header, vert, _vert_main };
+    const char *frag_shader_strs[] = { _120_frag_header, frag, _frag_main };
+
+    int vert_len, frag_len;
+    vert_len = frag_len = 0;
+    for (int i = 0; i < 3; i++) {
+        vert_len += strlen(vert_shader_strs[i]);
+        frag_len += strlen(frag_shader_strs[i]);
+    }
+
+    char vert_source[vert_len + 1];
+    char frag_source[frag_len + 1];
+    vert_source[0] = frag_source[0] = '\0';
+    for (int i = 0; i < 3; i++) {
+        strcat(vert_source, vert_shader_strs[i]);
+        strcat(frag_source, frag_shader_strs[i]);
+    }
+    vert_source[vert_len] = frag_source[frag_len] = '\0';
+
+    shader->handle = tea_shader(vert_source, frag_source);
     shader->world_loc = tea_get_uniform_location(shader->handle, "u_World");
     shader->modelview_loc = tea_get_uniform_location(shader->handle, "u_ModelView");
+    shader->texture_loc = tea_get_uniform_location(shader->handle, "u_Texture");
     return shader;
 }
 

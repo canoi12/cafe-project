@@ -295,6 +295,8 @@ typedef struct te_vao_s te_vao_t;
 typedef struct te_format_s te_format_t;
 typedef struct te_attrib_s te_attrib_t;
 
+typedef struct te_batch_s te_batch_t;
+
 struct te_attrib_s {
     te_ubyte offset, tag;
     te_ubyte size, stride;
@@ -495,6 +497,9 @@ TEAPI te_void tea_bind_vao(te_vao_t *vao);
 TEAPI te_void tea_enable_attrib(te_uint index);
 TEAPI te_void tea_disable_attrib(te_uint index);
 
+TEAPI te_void tea_draw_arrays(te_uint mode, te_int first, te_int count);
+TEAPI te_void tea_draw_elements(te_uint mode, te_int count, te_uint type, const te_void *indices);
+
 /*=====================================*
  *               Shader                *
  *=====================================*/
@@ -522,6 +527,15 @@ TEA_UNIFORM_X(i, te_int);
 TEAPI te_void tea_uniform_matrix2fv(te_int location, te_int count, te_bool transpose, const te_float *m);
 TEAPI te_void tea_uniform_matrix3fv(te_int location, te_int count, te_bool transpose, const te_float *m);
 TEAPI te_void tea_uniform_matrix4fv(te_int location, te_int count, te_bool transpose, const te_float *m);
+
+/*=====================================*
+ *                Batch                *
+ *=====================================*/
+
+TEAPI te_batch_t* tea_batch(te_uint size);
+TEAPI te_void tea_free_batch(te_batch_t *batch);
+
+TEAPI te_void tea_batch_add_rect(te_batch_t *batch, te_float x, te_float y, te_float w, te_float h);
 
 /*=====================================*
  *                Debug                *

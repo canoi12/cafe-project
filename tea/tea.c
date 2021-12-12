@@ -568,7 +568,7 @@ te_void tea_end(te_void) {
     te_format_t *format = &state()->vao.ptr->format;
     if (format->stride != 0)
         size = base()->vbo->offset / format->stride;
-    CALL_GL(DrawArrays)(state()->vao.mode, 0, size);
+    tea_draw_arrays(state()->vao.mode, 0, size);
     tea_bind_vao(NULL);
 }
 
@@ -1379,6 +1379,14 @@ te_void tea_bind_vao(te_vao_t *vao) {
 
 te_void tea_enable_attrib(te_uint index) {}
 te_void tea_disable_attrib(te_uint index) {}
+
+te_void tea_draw_arrays(te_uint mode, te_int first, te_int count) {
+    CALL_GL(DrawArrays)(mode, first, count);
+}
+
+te_void tea_draw_elements(te_uint mode, te_int count, te_uint type, const te_void *indices) {
+    CALL_GL(DrawElements)(mode, count, type, indices);
+}
 
 /*=====================================*
  *               Shader                *

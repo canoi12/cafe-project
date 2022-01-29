@@ -9,6 +9,11 @@
 #define CA_OK 0
 #define CA_ERROR -1
 
+#define CAFE_RGB(r, g, b) ((ca_Color){(r), (g), (b), 255})
+#define CAFE_RGBA(r, g, b, a) ((ca_Color){(r), (g), (b), (a)})
+
+#define CAFE_PI 3.14159
+
 typedef char ca_bool;
 typedef char ca_i8;
 typedef unsigned char ca_u8;
@@ -389,6 +394,27 @@ enum {
                                  for array bounds */
 };
 
+enum {
+    CAFE_LINE = 0,
+    CAFE_FILL
+};
+
+enum {
+    CAFE_NEAREST = 0,
+    CAFE_LINEAR
+};
+
+enum {
+    CAFE_CLAMP = 0,
+    CAFE_REPEAT
+};
+
+enum {
+    CAFE_TEXTURE_STATIC = 0,
+    CAFE_TEXTURE_STREAM,
+    CAFE_TEXTURE_TARGET
+};
+
 typedef struct Cafe Cafe;
 typedef struct {
     struct {
@@ -399,7 +425,7 @@ typedef struct {
     } window;
 } ca_Config;
 
-typedef void(*ca_UpdateFunction)(ca_f32 dt);
+typedef void(*ca_StepFunction)(ca_f32 dt);
 
 typedef struct { ca_u8 r, g, b, a; } ca_Color;
 typedef struct { ca_f32 x, y, w, h; } ca_Rect;
@@ -414,12 +440,14 @@ typedef struct ca_Texture ca_Texture;
 typedef struct ca_Font ca_Font;
 typedef struct ca_Shader ca_Shader;
 typedef struct ca_Camera ca_Camera;
+typedef struct ca_DrawCall ca_DrawCall;
 
 typedef struct ca_Sound ca_Sound;
 typedef struct ca_Music ca_Music;
 
 typedef struct ca_Joystick ca_Joystick;
 typedef struct ca_Gamepad ca_Gamepad;
+
 
 #if defined(__cplusplus)
 extern "C" {
@@ -441,7 +469,7 @@ CAFE_API ca_bool cafe_is_running(void);
 CAFE_API void cafe_begin();
 CAFE_API void cafe_end();
 
-CAFE_API void cafe_run(ca_UpdateFunction update);
+CAFE_API void cafe_run(ca_StepFunction step);
 
 /*=====================*
  * INPUT FUNCTIONS      *
@@ -476,13 +504,18 @@ CAFE_API ca_bool cafe_mouse_wasReleased(ca_i32 button);
  * Joystick      *
  ****************/
 
+CAFE_API ca_Joystick* cafe_joystick(ca_i32 index);
+CAFE_API void cafe_close_joystick(ca_Joystick *joystick);
 
 /*=====================*
  * RENDER FUNCTIONS    *
  *=====================*/
 
-CAFE_API void cafe_render_setMode(ca_i32 mode);
 CAFE_API void cafe_render_clear(ca_Color color);
+
+CAFE_API void cafe_render_setMode(ca_i32 mode);
+CAFE_API void cafe_render_setShader(ca_Shader* shader);
+CAFE_API void cafe_render_setTarget(ca_Texture* tex);
 CAFE_API void cafe_render_setColor(ca_Color color);
 
 CAFE_API void cafe_render_point(ca_f32 x, ca_f32 y);
@@ -499,8 +532,7 @@ CAFE_API void cafe_render_textEx(ca_Font* font, const char* text, ca_Rect *dest,
 
 CAFE_API void cafe_render_batch(ca_Batch* batch);
 
-CAFE_API void cafe_render_setShader(ca_Shader* shader);
-CAFE_API void cafe_render_setTarget(ca_Texture* tex);
+CAFE_API void cafe_render_drawCall(ca_DrawCall *draw_call);
 
 /*****************
  * Texture       *
@@ -513,6 +545,10 @@ CAFE_API void cafe_texture_destroy(ca_Texture* tex);
 
 CAFE_API void cafe_texture_setFilter(ca_Texture* tex, ca_i32 filter_min, ca_i32 filter_mag);
 CAFE_API void cafe_texture_setWrap(ca_Texture* tex, ca_i32 wrap_s, ca_i32 wrap_t);
+
+CAFE_API ca_i32 cafe_texture_getWidth(ca_Texture *tex);
+CAFE_API ca_i32 cafe_texture_getHeight(ca_Texture *tex);
+CAFE_API void cafe_texture_getSize(ca_Texture *tex, ca_i32 *width, ca_i32 *height);
 
 /*****************
  * Batch         *

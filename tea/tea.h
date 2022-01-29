@@ -259,6 +259,7 @@ typedef unsigned int te_uint;
 typedef float te_float;
 typedef double te_double;
 typedef int te_sizei;
+typedef int te_enum;
 
 typedef void te_void;
 
@@ -285,14 +286,16 @@ typedef unsigned int te_texture_t;
 typedef unsigned int te_fbo_t;
 typedef unsigned int te_rbo_t;
 
-typedef struct te_buffer_s te_buffer_t;
+//typedef struct te_buffer_s te_buffer_t;
+typedef unsigned int te_buffer_t;
 typedef struct {
     te_uint handle, usage;
     te_uint offset, size;
 } te_buffer_internal_t;
 
-typedef struct te_vao_s te_vao_t;
-typedef struct te_format_s te_format_t;
+//typedef struct te_vao_s te_vao_t;
+typedef unsigned int te_vao_t;
+typedef struct te_vertex_format_s te_vertex_format_t;
 typedef struct te_attrib_s te_attrib_t;
 
 typedef struct te_batch_s te_batch_t;
@@ -304,13 +307,15 @@ struct te_attrib_s {
 };
 
 #define TEA_MAX_ATTRIBS 16
-struct te_format_s {
+struct te_vertex_format_s {
+    te_vao_t handle;
     te_ubyte count;
     te_ushort stride;
     te_attrib_t attribs[TEA_MAX_ATTRIBS];
 };
 
 typedef unsigned int te_shader_t;
+typedef unsigned int te_program_t;
 
 #if defined(__cplusplus)
 extern "C" {
@@ -421,8 +426,9 @@ TEAPI te_texture_t tea_texture1D(const te_byte *data, te_uint width, te_uint for
 TEAPI te_texture_t tea_texture2D(const te_ubyte *data, te_uint width, te_uint height, te_uint format);
 TEAPI te_void tea_free_texture(te_texture_t tex);
 
-TEAPI te_void tea_bind_texture(te_uint target, te_texture_t tex);
+TEAPI te_texture_t tea_white_texture(te_void);
 
+TEAPI te_void tea_bind_texture(te_uint target, te_texture_t tex);
 
 TEAPI te_void tea_tex_image1D(te_uint target, te_int level, te_sizei width, const te_void* pixels);
 TEAPI te_void tea_tex_image2D(te_uint target, te_int level, te_sizei width, te_sizei height, const te_void *pixels);
@@ -457,45 +463,45 @@ TEAPI te_void tea_free_rbo(te_rbo_t rbo);
  *               Buffer                *
  *=====================================*/
 
-TEAPI te_buffer_t *tea_buffer(te_uint size);
+TEAPI te_void tea_gen_buffers(te_uint size, te_buffer_t *buffers);
+TEAPI te_void tea_delete_buffers(te_uint size, te_buffer_t *buffers);
+
+//TEAPI te_buffer_t *tea_buffer(te_uint size);
+TEAPI te_buffer_t tea_buffer(te_void);
 TEAPI te_void tea_free_buffer(te_buffer_t *buffer);
 
-TEAPI te_void tea_bind_buffer(te_uint target, te_buffer_t *buffer);
+TEAPI te_void tea_bind_buffer(te_enum target, te_buffer_t buffer);
 
-TEAPI te_void tea_buffer_data(te_uint target, te_uint size, const te_void *data, te_uint usage);
-TEAPI te_void tea_buffer_subdata(te_uint target, te_uint offset, te_uint size, const te_void *data);
+TEAPI te_void tea_buffer_data(te_enum target, te_uint size, const te_void *data, te_uint usage);
+TEAPI te_void tea_buffer_subdata(te_enum target, te_uint offset, te_uint size, const te_void *data);
 
+TEAPI te_void* tea_map_buffer(te_enum target, te_enum access);
+TEAPI te_bool tea_unmap_buffer(te_enum target);
+/*
 TEAPI te_void tea_lock_buffer(te_uint target);
 TEAPI te_void tea_unlock_buffer(te_uint target);
 TEAPI te_void tea_seek_buffer(te_uint target, te_uint offset);
 TEAPI te_uint tea_tell_buffer(te_uint target);
 TEAPI te_void tea_read_buffer(te_uint target, te_void *data, te_uint size);
 TEAPI te_void tea_write_buffer(te_uint target, const te_void *data, te_uint size);
+*/
 
 /*=====================================*
  *            Vertex Array             *
  *=====================================*/
 
-enum {
-    TEA_ATTRIB_POSITION = 0,
-    TEA_ATTRIB_POSITION_3D,
-    TEA_ATTRIB_COLOR,
-    TEA_ATTRIB_TEXCOORD,
-    TEA_ATTRIB_NORMAL
-};
+TEAPI te_void tea_gen_vaos(te_uint size, te_vao_t *vao);
+TEAPI te_void tea_delete_vaos(te_uint size, te_vao_t *vao);
 
-TEAPI te_void tea_init_format(te_format_t *format);
-TEAPI te_void tea_format_add_tag(te_format_t *format, te_uint tag);
-
-TEAPI te_void tea_bind_format(te_format_t *format);
-
-TEAPI te_vao_t* tea_vao(te_void);
+TEAPI te_vao_t tea_vao(te_void);
 TEAPI te_void tea_free_vao(te_vao_t *vao);
 
-TEAPI te_void tea_bind_vao(te_vao_t *vao);
+TEAPI te_void tea_bind_vao(te_vao_t vao);
 
 TEAPI te_void tea_enable_attrib(te_uint index);
 TEAPI te_void tea_disable_attrib(te_uint index);
+
+TEAPI te_void tea_vertex_attrib_pointer(te_uint index, te_int size, te_enum type, te_bool normalized, te_sizei stride, const te_void *pointer);
 
 TEAPI te_void tea_draw_arrays(te_uint mode, te_int first, te_int count);
 TEAPI te_void tea_draw_elements(te_uint mode, te_int count, te_uint type, const te_void *indices);
@@ -504,12 +510,20 @@ TEAPI te_void tea_draw_elements(te_uint mode, te_int count, te_uint type, const 
  *               Shader                *
  *=====================================*/
 
-TEAPI te_shader_t tea_shader(const te_byte *vert, const te_byte *frag);
-TEAPI te_void tea_free_shader(te_shader_t shader);
+//TEAPI te_shader_t tea_shader(const te_byte *vert, const te_byte *frag);
+//TEAPI te_void tea_free_shader(te_shader_t shader);
 
-TEAPI te_void tea_use_shader(te_shader_t shader);
+//TEAPI te_void tea_use_shader(te_shader_t shader);
 
-TEAPI te_int tea_get_uniform_location(te_shader_t shader, const te_byte *name);
+TEAPI te_shader_t tea_shader(te_enum type, const te_byte *source);
+TEAPI te_void tea_delete_shader(te_shader_t shader);
+
+TEAPI te_program_t tea_program(te_uint count, te_shader_t *shaders);
+TEAPI te_void tea_free_program(te_program_t *program);
+
+TEAPI te_void tea_use_program(te_program_t program);
+
+TEAPI te_int tea_get_uniform_location(te_program_t shader, const te_byte *name);
 
 #define TEA_UNIFORM_X(X, T)\
 TEAPI te_void tea_uniform1##X(te_int location, T v);\
@@ -536,6 +550,65 @@ TEAPI te_batch_t* tea_batch(te_uint size);
 TEAPI te_void tea_free_batch(te_batch_t *batch);
 
 TEAPI te_void tea_batch_add_rect(te_batch_t *batch, te_float x, te_float y, te_float w, te_float h);
+
+/*=====================================*
+ *           Vertex Format             *
+ *=====================================*/
+
+enum {
+    TEA_ATTRIB_BYTE,
+    TEA_ATTRIB_UBYTE,
+    TEA_ATTRIB_INT,
+    TEA_ATTRIB_FLOAT,
+
+    TEA_ATTRIB_VEC2,
+    TEA_ATTRIB_VEC3,
+    TEA_ATTRIB_VEC4,
+
+    TEA_ATTRIB_VEC2I,
+    TEA_ATTRIB_VEC3I,
+    TEA_ATTRIB_VEC4I
+};
+
+enum {
+    TEA_ATTRIB_POSITION = 0,
+    TEA_ATTRIB_POSITION_3D,
+    TEA_ATTRIB_COLOR,
+    TEA_ATTRIB_TEXCOORD,
+    TEA_ATTRIB_NORMAL
+};
+
+TEAPI te_vertex_format_t* tea_vertex_format(te_void);
+TEAPI te_void tea_free_vertex_format(te_vertex_format_t *format);
+
+TEAPI te_void tea_begin_vertex_format(te_vertex_format_t *format);
+TEAPI te_void tea_vertex_format_add_attrib(te_enum attrib);
+TEAPI te_void tea_end_vertex_format(te_vertex_format_t *format);
+
+
+/*=====================================*
+ *               Vertex                *
+ *=====================================*/
+
+typedef struct te_vertex_s te_vertex_t;
+
+TEAPI te_vertex_t* tea_vertex(te_vertex_format_t *format, te_int vertices);
+TEAPI te_void tea_free_vertex(te_vertex_t *vertex);
+
+TEAPI te_void tea_begin_vertex(te_vertex_t *vertex);
+TEAPI te_void tea_end_vertex(te_vertex_t *vertex);
+TEAPI te_void tea_flush_vertex(te_vertex_t *vertex);
+TEAPI te_void tea_draw_vertex(te_vertex_t *vertex, te_enum mode);
+TEAPI te_void tea_draw_vertex_part(te_vertex_t *vertex, te_enum mode, te_int start, te_int count);
+
+TEAPI te_bool tea_vertex_is_empty(te_vertex_t *vertex);
+
+TEAPI te_int tea_vertex_offset(te_vertex_t *vertex);
+TEAPI te_int tea_vertex_size(te_vertex_t *vertex);
+TEAPI te_int tea_vertex_vertices(te_vertex_t *vertex);
+TEAPI te_int tea_vertex_vertice_offset(te_vertex_t *vertex);
+
+TEAPI te_void tea_vertex_grow(te_vertex_t *vertex);
 
 /*=====================================*
  *                Debug                *

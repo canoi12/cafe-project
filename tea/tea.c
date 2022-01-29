@@ -417,14 +417,10 @@ struct te_proc_s {
     const te_byte *names[3];
 };
 
-struct te_vao_s {
-    te_format_t format;
-    te_uint handle;
-    te_buffer_t* buffers[3];
-};
-
-struct te_buffer_s {
-    te_uint handle, usage;
+struct te_vertex_s {
+    te_vertex_format_t* format;
+    te_vao_t vao;
+    te_buffer_t vbo;
     te_uint offset, size;
     te_void *data;
 };
@@ -449,23 +445,26 @@ struct matrix_stack_s {
 };
 
 struct te_base_s {
-    te_vao_t *vao;
-    te_buffer_t *vbo, *ibo;
-    te_shader_t shader;
-    te_format_t format;
+    te_program_t program;
+    te_vertex_format_t *format;
+
+    te_vao_t vao;
+    te_buffer_t vbo, ibo;
 };
 
 struct te_state_s {
     te_uint clear_flags;
-    te_texture_t *texture;
+    te_texture_t texture;
     te_shader_t shader;
     struct {
-        te_vao_t *ptr;
-        te_uint mode;
+        te_vertex_format_t *format;
+        te_vertex_t *ptr;
+        te_enum mode;
+        te_float pos[4];
         te_float color[4];
         te_float texcoord[2];
         te_float normal[3];
-    } vao;
+    } vertex;
     struct {
         struct matrix_stack_s stack[3];
         te_uint mode;
@@ -480,7 +479,12 @@ struct Tea {
 };
 
 static Tea s_tea_ctx;
-static te_vao_t s_default_vao;
+static te_vertex_t s_default_vertex;
+static te_texture_t s_white_texture;
+
+static te_vertex_format_t* s_default_format_2d;
+static te_vertex_format_t* s_default_format_2d_z;
+static te_vertex_format_t* s_default_format_3d;
 
 static te_bool s_load_gl(te_void);
 static te_void s_setup_gl(te_void);
@@ -489,7 +493,8 @@ static te_void s_close_gl(te_void);
 static te_void* s_get_proc(const te_byte *name);
 static te_buffer_t* s_get_buffer_safe(te_uint target);
 
-#define TEA_GL_DYNAMIC_DRAW
+te_void s_enable_vertex_format(te_vertex_format_t *format);
+te_void s_disable_vertex_format(te_vertex_format_t *format);
 
 #define BUFFER_SIZE 1000
 te_config_t tea_config(te_void) {
@@ -505,7 +510,6 @@ te_config_t tea_config(te_void) {
 te_int tea_init(te_config_t *config) {
     TEA_ASSERT(config != NULL, "config is NULL");
     memset(tea(), 0, sizeof(Tea));
-    memset(&s_default_vao, 0, sizeof(te_vao_t));
     gl()->version.major = config->gl.mag;
     gl()->version.minor = config->gl.min;
     gl()->version.es = config->gl.es;
@@ -516,60 +520,113 @@ te_int tea_init(te_config_t *config) {
     } else
         TEA_ASSERT(0, "failed to initialize OpenGL");
 
-    state()->vao.color[3] = 1.f;
+    state()->vertex.color[3] = 1.f;
+    state()->vertex.pos[2] = 0.f;
+    state()->vertex.pos[3] = 1.f;
     tea_matrix_mode(TEA_MODELVIEW);
     tea_load_identity();
     tea_matrix_mode(TEA_PROJECTION);
     tea_load_identity();
 
     state()->clear_flags = TEA_COLOR_BUFFER_BIT | TEA_DEPTH_BUFFER_BIT;
-    base()->vbo = tea_buffer(config->vbo.size);
-    base()->ibo = tea_buffer(config->ibo.size);
+    s_default_format_2d = tea_vertex_format();
+    s_default_format_2d_z = tea_vertex_format();
+    s_default_format_3d = tea_vertex_format();
 
-    te_format_t *format = &base()->format;
-    tea_init_format(format);
-    tea_format_add_tag(format, TEA_ATTRIB_POSITION_3D);
-    tea_format_add_tag(format, TEA_ATTRIB_COLOR);
-    tea_format_add_tag(format, TEA_ATTRIB_TEXCOORD);
+    te_vertex_format_t *format = s_default_format_2d_z;
+    tea_begin_vertex_format(format);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_POSITION_3D);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_COLOR);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_TEXCOORD);
+    tea_end_vertex_format(format);
+
+    format = s_default_format_2d;
+    tea_begin_vertex_format(format);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_POSITION);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_COLOR);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_TEXCOORD);
+    tea_end_vertex_format(format);
+
+    format = s_default_format_3d;
+    tea_begin_vertex_format(format);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_POSITION_3D);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_COLOR);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_TEXCOORD);
+    tea_vertex_format_add_attrib(TEA_ATTRIB_NORMAL);
+    tea_end_vertex_format(format);
+
+    base()->format = s_default_format_2d_z;
+    state()->vertex.ptr = &s_default_vertex;
 
     base()->vao = tea_vao();
-    state()->vao.ptr = &s_default_vao;
-#if 1
-    tea_bind_vao(base()->vao);
+    te_vertex_t *vertex = &s_default_vertex;
+    memset(vertex, 0, sizeof(*vertex));
+    //memcpy(&vertex->format, base()->format, sizeof(*format));
+    vertex->vao = base()->vao;
+    vertex->format = base()->format;
+    vertex->size = config->vbo.size;
+    base()->vbo = tea_buffer();
+    vertex->data = malloc(vertex->size);
+    te_vao_t vao = vertex->vao;
+    TEA_ASSERT(vertex->data != NULL, "Failed to alloc memory for default vertex data\n");
+    tea_bind_vao(vao);
     tea_bind_buffer(TEA_ARRAY_BUFFER, base()->vbo);
-    tea_buffer_data(TEA_ARRAY_BUFFER, config->vbo.size, NULL, config->vbo.usage);
-    tea_bind_buffer(TEA_ELEMENT_ARRAY_BUFFER, base()->ibo);
-    tea_buffer_data(TEA_ELEMENT_ARRAY_BUFFER, config->ibo.size, NULL, config->ibo.usage);
-    tea_bind_format(format);
-    tea_bind_vao(NULL);
-#endif
+    s_enable_vertex_format(vertex->format);
+    tea_buffer_data(TEA_ARRAY_BUFFER, vertex->size, NULL, TEA_DYNAMIC_DRAW);
+    tea_bind_vao(0);
+    base()->ibo = tea_buffer();
+
+    vertex->vbo = base()->vbo;
+    state()->vertex.format = base()->format;
+
+
+    const te_byte white_pixel_data[] = {
+        255, 255, 255, 255
+    };
+    s_white_texture = tea_texture2D(white_pixel_data, 1, 1, TEA_RGBA);
     return TEA_OK;
 }
 
 te_void tea_quit(te_void) {
-    tea_free_vao(base()->vao);
-    tea_free_buffer(base()->vbo);
-    tea_free_buffer(base()->ibo);
+    te_vertex_t *vertex = &s_default_vertex;
+    tea_free_buffer(&vertex->vbo);
+    tea_free_texture(s_white_texture);
 }
 
 te_void tea_begin(te_ubyte mode) {
     TEA_ASSERT(mode >= TEA_POINTS && mode <= TEA_TRIANGLE_FAN, "invalid draw mode");
-    state()->vao.mode = mode;
-    te_vao_t *vao = state()->vao.ptr->handle ? state()->vao.ptr : base()->vao;
-    tea_bind_vao(vao);
-    tea_bind_buffer(TEA_ARRAY_BUFFER, base()->vbo);
-    tea_lock_buffer(TEA_ARRAY_BUFFER);
-    tea_seek_buffer(TEA_ARRAY_BUFFER, 0);
+    te_vertex_t *vertex = state()->vertex.ptr ? state()->vertex.ptr : &s_default_vertex;
+
+    state()->vertex.mode = mode;
+    tea_begin_vertex(vertex);
 }
 
 te_void tea_end(te_void) {
-    tea_unlock_buffer(TEA_ARRAY_BUFFER);
-    te_int size = 0;
-    te_format_t *format = &state()->vao.ptr->format;
-    if (format->stride != 0)
-        size = base()->vbo->offset / format->stride;
-    tea_draw_arrays(state()->vao.mode, 0, size);
-    tea_bind_vao(NULL);
+    te_vertex_t *vertex = state()->vertex.ptr;
+    tea_end_vertex(vertex);
+    tea_draw_vertex(vertex, state()->vertex.mode);
+}
+
+static te_void s_tea_push_vertex(te_void) {
+    te_vertex_t *vertex = state()->vertex.ptr;
+    te_byte *data = vertex->data;
+    te_float *ptr = (te_float*)(data + vertex->offset);
+    te_vertex_format_t *format = vertex->format;
+    ptr[0] = state()->vertex.pos[0];
+    ptr[1] = state()->vertex.pos[1];
+    ptr[2] = state()->vertex.pos[2];
+    ptr[3] = state()->vertex.pos[3];
+    te_uint i = format->attribs[0].size;
+    ptr[i] = state()->vertex.color[0];
+    ptr[i+1] = state()->vertex.color[1];
+    ptr[i+2] = state()->vertex.color[2];
+    ptr[i+3] = state()->vertex.color[3];
+    ptr[i+4] = state()->vertex.texcoord[0];
+    ptr[i+5] = state()->vertex.texcoord[1];
+    ptr[i+6] = state()->vertex.normal[0];
+    ptr[i+7] = state()->vertex.normal[1];
+    ptr[i+8] = state()->vertex.normal[2];
+    vertex->offset += format->stride;
 }
 
 te_void tea_vertex2f(te_float x, te_float y) {
@@ -588,34 +645,24 @@ te_void tea_vertex4f(te_float x, te_float y, te_float z, te_float w) {
 }
 
 te_void tea_vertex2fv(te_float *v) {
-    te_float p[] = {v[0], v[1], 0.0f, 1.0f};
-    tea_vertex4fv(p);
+    state()->vertex.pos[0] = v[0];
+    state()->vertex.pos[1] = v[1];
+    s_tea_push_vertex();
 }
 
 te_void tea_vertex3fv(te_float *v) {
-    te_float p[] = {v[0], v[1], v[2], 1.0f};
-    tea_vertex4fv(p);
+    state()->vertex.pos[0] = v[0];
+    state()->vertex.pos[1] = v[1];
+    state()->vertex.pos[2] = v[2];
+    s_tea_push_vertex();
 }
 
 te_void tea_vertex4fv(te_float *v) {
-    te_byte *data = base()->vbo->data;
-    te_float *ptr = (te_float*)(data + base()->vbo->offset);
-    te_format_t *format = &state()->vao.ptr->format;
-    ptr[0] = v[0];
-    ptr[1] = v[1];
-    ptr[2] = v[2];
-    ptr[3] = v[3];
-    te_uint i = format->attribs[0].size;
-    ptr[i] = state()->vao.color[0];
-    ptr[i+1] = state()->vao.color[1];
-    ptr[i+2] = state()->vao.color[2];
-    ptr[i+3] = state()->vao.color[3];
-    ptr[i+4] = state()->vao.texcoord[0];
-    ptr[i+5] = state()->vao.texcoord[1];
-    ptr[i+6] = state()->vao.normal[0];
-    ptr[i+7] = state()->vao.normal[1];
-    ptr[i+8] = state()->vao.normal[2];
-    base()->vbo->offset += format->stride;
+    state()->vertex.pos[0] = v[0];
+    state()->vertex.pos[1] = v[1];
+    state()->vertex.pos[2] = v[2];
+    state()->vertex.pos[3] = v[3];
+    s_tea_push_vertex();
 }
 
 te_void tea_color3f(te_float r, te_float g, te_float b) {
@@ -639,16 +686,16 @@ te_void tea_color4ub(te_ubyte r, te_ubyte g, te_ubyte b, te_ubyte a) {
 }
 
 te_void tea_color3fv(te_float *v) {
-    state()->vao.color[0] = v[0];
-    state()->vao.color[1] = v[1];
-    state()->vao.color[2] = v[2];
+    state()->vertex.color[0] = v[0];
+    state()->vertex.color[1] = v[1];
+    state()->vertex.color[2] = v[2];
 }
 
 te_void tea_color4fv(te_float *v) {
-    state()->vao.color[0] = v[0];
-    state()->vao.color[1] = v[1];
-    state()->vao.color[2] = v[2];
-    state()->vao.color[3] = v[3];
+    state()->vertex.color[0] = v[0];
+    state()->vertex.color[1] = v[1];
+    state()->vertex.color[2] = v[2];
+    state()->vertex.color[3] = v[3];
 }
 
 te_void tea_texcoord2f(te_float x, te_float y) {
@@ -657,8 +704,8 @@ te_void tea_texcoord2f(te_float x, te_float y) {
 }
 
 te_void tea_texcoord2fv(te_float *v) {
-    state()->vao.texcoord[0] = v[0];
-    state()->vao.texcoord[1] = v[1];
+    state()->vertex.texcoord[0] = v[0];
+    state()->vertex.texcoord[1] = v[1];
 }
 
 te_void tea_normal3f(te_float x, te_float y, te_float z) {
@@ -667,9 +714,9 @@ te_void tea_normal3f(te_float x, te_float y, te_float z) {
 }
 
 te_void tea_normal3fv(te_float *v) {
-    state()->vao.normal[0] = v[0];
-    state()->vao.normal[1] = v[1];
-    state()->vao.normal[2] = v[2];
+    state()->vertex.normal[0] = v[0];
+    state()->vertex.normal[1] = v[1];
+    state()->vertex.normal[2] = v[2];
 }
 
 /*=====================================*
@@ -1083,10 +1130,13 @@ te_void tea_free_texture(te_texture_t tex) {
     CALL_GL(DeleteTextures)(1, &tex);
 }
 
+te_texture_t tea_white_texture(te_void) {
+    return s_white_texture;
+}
+
 te_void tea_bind_texture(te_uint target, te_texture_t tex) {
     CALL_GL(BindTexture)(target, tex);
 }
-
 
 te_void tea_tex_image1D(te_uint target, te_int level, te_sizei width, const te_void* pixels) {
     CALL_GL(TexImage1D)(target, level, TEA_RGBA, width, 0, TEA_RGBA, TEA_UNSIGNED_BYTE, pixels);
@@ -1179,100 +1229,51 @@ struct {
     {3, 12, TEA_FLOAT, TEA_NORMAL_ARRAY, NormalPointer},
 };
 
-static te_buffer_t* s_get_buffer(te_uint target) {
-    te_uint tg = target - TEA_ARRAY_BUFFER;
-    TEA_ASSERT(tg < 2, "invalid target");
-    return state()->vao.ptr->buffers[tg];
+te_void tea_gen_buffers(te_uint size, te_buffer_t *buffers) {
+    CALL_GL(GenBuffers)(size, buffers);
 }
 
-te_buffer_t* s_get_buffer_safe(te_uint target) {
-    te_buffer_t *buffer = s_get_buffer(target);
-    TEA_ASSERT(buffer != NULL, "invalid target");
+te_void tea_delete_buffers(te_uint size, te_buffer_t *buffers) {
+    CALL_GL(DeleteBuffers)(size, buffers);
+}
+
+te_buffer_t tea_buffer(te_void) {
+    te_buffer_t buffer = 0;
+    tea_gen_buffers(1, &buffer);
     return buffer;
 }
 
-te_buffer_t *tea_buffer(te_uint size) {
-    te_buffer_t *buffer = (te_buffer_t *)calloc(1, sizeof(te_buffer_t));
-    TEA_ASSERT(buffer != NULL, "failed to allocate buffer");
-    buffer->size = size;
-    CALL_GL(GenBuffers)(1, &buffer->handle);
-    return buffer;
-}
 te_void tea_free_buffer(te_buffer_t *buffer) {
-    if (!buffer) return;
-    if (buffer->handle)
-        CALL_GL(DeleteBuffers)(1, &buffer->handle);
-    free(buffer);
+    if (!buffer)
+        return;
+    tea_delete_buffers(1, buffer);
 }
 
-te_void tea_bind_buffer(te_uint target, te_buffer_t *buffer) {
-    TEA_ASSERT(target == TEA_ARRAY_BUFFER || target == TEA_ELEMENT_ARRAY_BUFFER, "Invalid buffer target");
-    te_uint glbuf = buffer ? buffer->handle : 0;
-    te_uint targetIndex = target - TEA_ARRAY_BUFFER;
-    state()->vao.ptr->buffers[targetIndex] = buffer;
-    CALL_GL(BindBuffer)(target, glbuf);
+te_void tea_bind_buffer(te_enum target, te_buffer_t buffer) {
+    CALL_GL(BindBuffer)(target, buffer);
 }
 
-te_void tea_buffer_data(te_uint target, te_uint size, const te_void *data, te_uint usage) {
+te_void tea_buffer_data(te_enum target, te_uint size, const te_void *data, te_uint usage) {
     CALL_GL(BufferData)(target, size, data, usage);
 }
-te_void tea_buffer_subdata(te_uint target, te_uint offset, te_uint size, const te_void *data) {
+te_void tea_buffer_subdata(te_enum target, te_uint offset, te_uint size, const te_void *data) {
     CALL_GL(BufferSubData)(target, offset, size, data);
 }
 
-te_void tea_lock_buffer(te_uint target) {
-    te_buffer_t *buffer = s_get_buffer_safe(target);
-    buffer->data = CALL_GL(MapBuffer)(target, TEA_WRITE_ONLY);
-}
-te_void tea_unlock_buffer(te_uint target) {
-    te_buffer_t *buffer = s_get_buffer_safe(target);
-    CALL_GL(UnmapBuffer)(target);
-    buffer->data = NULL;
+te_void* tea_map_buffer(te_enum target, te_enum access) {
+    return CALL_GL(MapBuffer)(target, access);
 }
 
-te_void tea_seek_buffer(te_uint target, te_uint offset) {
-    te_buffer_t *buffer = s_get_buffer_safe(target);
-    buffer->offset = offset;
-}
-te_uint tea_tell_buffer(te_uint target) {
-    te_buffer_t *buffer = s_get_buffer_safe(target);
-    return buffer->offset;
-}
-te_void tea_read_buffer(te_uint target, te_void *data, te_uint size) {
-    if (!data) return;
-    te_buffer_t *buffer = s_get_buffer_safe(target);
-    memcpy(data, buffer->data, size);
-}
-te_void tea_write_buffer(te_uint target, const te_void *data, te_uint size) {
-    if (!data) return;
-    te_buffer_t *buffer = s_get_buffer_safe(target);
-    int diff = buffer->size - buffer->offset;
-    size = size > diff ? diff : size;
-    memcpy(buffer->data, data, size);
-    buffer->offset += size;
+te_bool tea_unmap_buffer(te_enum target) {
+    return CALL_GL(UnmapBuffer)(target);
 }
 
 /*=====================================*
  *            Vertex Array             *
  *=====================================*/
 
-te_void tea_init_format(te_format_t *format) {
-    memset(format, 0, sizeof(*format));
-}
-te_void tea_format_add_tag(te_format_t *format, te_uint tag) {
-    TEA_ASSERT(format->count < TEA_MAX_ATTRIBS, "too many attributes");
-    te_attrib_t *attrib = &format->attribs[format->count];
-    attrib->tag = tag;
-    attrib->type = _attribInternal[tag].type;
-    attrib->size = _attribInternal[tag].size;
-    attrib->stride = _attribInternal[tag].stride;
-    attrib->offset = format->stride;
-
-    format->count++;
-    format->stride += attrib->stride;
-}
-
-static te_void s_enable_format(te_format_t *format) {
+#if 0
+te_void s_enable_format(te_format_t *format) {
     te_int i;
     if (gl()->extensions & TEA_HAS_VBO &&
         gl()->extensions & TEA_HAS_VAO) {
@@ -1290,7 +1291,7 @@ static te_void s_enable_format(te_format_t *format) {
     }
 }
 
-static te_void s_disable_format(te_format_t *format) {
+te_void s_disable_format(te_format_t *format) {
     te_int i;
     if (gl()->extensions & TEA_HAS_VBO &&
         gl()->extensions & TEA_HAS_VAO) {
@@ -1308,26 +1309,32 @@ te_void tea_bind_format(te_format_t *format) {
     s_enable_format(format);
     memcpy(&state()->vao.ptr->format, format, sizeof(*format));
 }
+#endif
 
-te_vao_t* tea_vao(te_void) {
-    te_vao_t *vao = calloc(1, sizeof(*vao));
-    TEA_ASSERT(vao != NULL, "cannot alloc memory for vao");
-    if (gl()->extensions & TEA_HAS_VAO)
-        CALL_GL(GenVertexArrays)(1, &vao->handle);
+te_void tea_gen_vaos(te_uint size, te_vao_t *vao) {
+    CALL_GL(GenVertexArrays)(size, vao);
+}
+
+te_void tea_delete_vaos(te_uint size, te_vao_t *vao) {
+    CALL_GL(DeleteVertexArrays)(size, vao);
+}
+
+te_vao_t tea_vao(te_void) {
+    te_vao_t vao = 0;
+    tea_gen_vaos(1, &vao);
     return vao;
 }
 te_void tea_free_vao(te_vao_t *vao) {
-    if (!vao) return;
-    if (gl()->extensions & TEA_HAS_VAO)
-        CALL_GL(DeleteVertexArrays)(1, &vao->handle);
-    free(vao);
-    vao = NULL;
+    if (!vao)
+        return;
+    tea_delete_vaos(1, vao);
 }
 
-typedef te_void(*TeaBindVAOProc)(te_vao_t *vao);
+typedef te_void(*TeaBindVAOProc)(te_vao_t vao);
 static TeaBindVAOProc s_tea_bind_vao;
 
-static te_void s_tea_bind_vao1(te_vao_t *vao) {
+static te_void s_tea_bind_vao1(te_vao_t vao) {
+#if 0
     vao = vao ? vao : &s_default_vao;
     te_format_t *format = &state()->vao.ptr->format;
     for (te_int i = 0; i < format->count; i++) {
@@ -1340,9 +1347,11 @@ static te_void s_tea_bind_vao1(te_vao_t *vao) {
         CALL_GL(EnableClientState)(_attribInternal[attrib->tag].client);
     }
     state()->vao.ptr = vao;
+#endif
 }
 
-static te_void s_tea_bind_vao2(te_vao_t *vao) {
+static te_void s_tea_bind_vao2(te_vao_t vao) {
+#if 0
     vao = vao ? vao : &s_default_vao;
     for (te_uint i = 0; i < state()->vao.ptr->format.count; i++) {
         CALL_GL(DisableVertexAttribArray)(i);
@@ -1365,20 +1374,33 @@ static te_void s_tea_bind_vao2(te_vao_t *vao) {
         }
     }
     state()->vao.ptr = vao;
+#endif
 }
 
-static te_void s_tea_bind_vao3(te_vao_t *vao) {
+static te_void s_tea_bind_vao3(te_vao_t vao) {
+#if 0
     vao = vao ? vao : &s_default_vao;
     CALL_GL(BindVertexArray)(vao->handle);
     state()->vao.ptr = vao;
+#endif
+    CALL_GL(BindVertexArray)(vao);
 }
 
-te_void tea_bind_vao(te_vao_t *vao) {
+te_void tea_bind_vao(te_vao_t vao) {
     s_tea_bind_vao(vao);
 }
 
-te_void tea_enable_attrib(te_uint index) {}
-te_void tea_disable_attrib(te_uint index) {}
+te_void tea_enable_attrib(te_uint index) {
+    CALL_GL(EnableVertexAttribArray)(index);
+}
+
+te_void tea_disable_attrib(te_uint index) {
+    CALL_GL(DisableVertexAttribArray)(index);
+}
+
+te_void tea_vertex_attrib_pointer(te_uint index, te_int size, te_enum type, te_bool normalized, te_sizei stride, const te_void *pointer) {
+    CALL_GL(VertexAttribPointer)(index, size, type, normalized, stride, pointer);
+}
 
 te_void tea_draw_arrays(te_uint mode, te_int first, te_int count) {
     CALL_GL(DrawArrays)(mode, first, count);
@@ -1393,54 +1415,66 @@ te_void tea_draw_elements(te_uint mode, te_int count, te_uint type, const te_voi
  *=====================================*/
 #define TEA_COMPILE_STATUS 0x8B81
 #define TEA_LINK_STATUS 0x8B82
-static te_uint s_shader_compile(te_uint type, const char *source) {
+
+const te_byte *shader_type_names[] = {
+    "Fragment",
+    "Vertex"
+};
+
+te_shader_t tea_shader(te_enum type, const te_byte *source) {
+    TEA_ASSERT(type >= TEA_FRAGMENT_SHADER, "Invalid shader type\n");
+    TEA_ASSERT(source != NULL, "%s shader source is NULL\n", shader_type_names[type - TEA_FRAGMENT_SHADER]);
     te_uint shader = CALL_GL(CreateShader)(type);
     CALL_GL(ShaderSource)(shader, 1, &source, NULL);
     CALL_GL(CompileShader)(shader);
     te_int status;
-    const char *shader_type_str = type == TEA_VERTEX_SHADER ? "vertex" : "fragment";
+    //const char *shader_type_str = type == TEA_VERTEX_SHADER ? "vertex" : "fragment";
     CALL_GL(GetShaderiv)(shader, TEA_COMPILE_STATUS, &status);
     if (status == 0) {
         char log[1024];
         CALL_GL(GetShaderInfoLog)(shader, 1024, NULL, log);
-        TEA_ASSERT(0, "%s shader compile error: %s", shader_type_str, log);
+        TEA_ASSERT(0, "%s shader compile error: %s", shader_type_names[type - TEA_FRAGMENT_SHADER], log);
     }
     return shader;
 }
 
-te_shader_t tea_shader(const te_byte *vert, const te_byte *frag) {
-    TEA_ASSERT(vert != NULL, "vertex shader source is null");
-    TEA_ASSERT(frag != NULL, "fragment shader source is null");
-    te_shader_t shader = CALL_GL(CreateProgram)();
-    te_uint fragShader = s_shader_compile(TEA_FRAGMENT_SHADER, frag);
-    te_uint vertShader = s_shader_compile(TEA_VERTEX_SHADER, vert);
-    CALL_GL(AttachShader)(shader, fragShader);
-    CALL_GL(AttachShader)(shader, vertShader);
-    CALL_GL(LinkProgram)(shader);
+te_void tea_delete_shader(te_shader_t shader) {
+    if (!shader)
+        return;
+    CALL_GL(DeleteShader)(shader);
+}
+
+te_program_t tea_program(te_uint count, te_shader_t *shaders) {
+    TEA_ASSERT(shaders != NULL, "Shaders cannot be NULL\n");
+    te_program_t program = CALL_GL(CreateProgram)();
+    for (te_int i = 0; i < count; i++)
+        CALL_GL(AttachShader)(program, shaders[i]);
+
+    CALL_GL(LinkProgram)(program);
     te_int status;
-    CALL_GL(GetProgramiv)(shader, TEA_LINK_STATUS, &status);
+    CALL_GL(GetProgramiv)(program, TEA_LINK_STATUS, &status);
     if (status == 0) {
         char log[1024];
-        CALL_GL(GetProgramInfoLog)(shader, 1024, NULL, log);
-        TEA_ASSERT(0, "shader link error: %s", log);
+        CALL_GL(GetProgramInfoLog)(program, 1024, NULL, log);
+        TEA_ASSERT(0, "program link error: %s", log);
     }
-    CALL_GL(DeleteShader)(fragShader);
-    CALL_GL(DeleteShader)(vertShader);
-    return shader;
-}
-te_void tea_free_shader(te_shader_t shader) {
-    if (gl()->extensions & TEA_HAS_SHADER &&
-        shader)
-        CALL_GL(DeleteProgram)(shader);
+
+    return program;
 }
 
-te_void tea_use_shader(te_shader_t shader) {
-    if (gl()->extensions & TEA_HAS_SHADER)
-        CALL_GL(UseProgram)(shader);
-    state()->shader = shader;
+te_void tea_free_program(te_program_t *program) {
+    if (!program)
+        return;
+
+    CALL_GL(DeleteProgram)(*program);
+    *program = 0;
 }
 
-te_int tea_get_uniform_location(te_shader_t shader, const te_byte *name) {
+te_void tea_use_program(te_program_t program) {
+    CALL_GL(UseProgram)(program);
+}
+
+te_int tea_get_uniform_location(te_program_t shader, const te_byte *name) {
     if (gl()->extensions & TEA_HAS_SHADER)
         return CALL_GL(GetUniformLocation)(shader, name);
     return -1;
@@ -1469,6 +1503,185 @@ te_void tea_uniform_matrix4fv(te_int location, te_int count, te_bool transpose, 
     CALL_GL(UniformMatrix4fv)(location, count, transpose, m);
 }
 
+/*=====================================*
+ *               Format                *
+ *=====================================*/
+
+te_void s_enable_vertex_format(te_vertex_format_t *format) {
+    te_int i;
+    for (i = 0; i < format->count; i++) {
+        te_attrib_t *attrib = &format->attribs[i];
+        CALL_GL(EnableVertexAttribArray)(i);
+        CALL_GL(VertexAttribPointer)(i, attrib->size, attrib->type, TEA_FALSE, format->stride, (te_void*)attrib->offset);
+    }
+}
+
+te_void s_disable_vertex_format(te_vertex_format_t *format) {
+    te_int i;
+    for (i = 0; i < format->count; i++)
+            CALL_GL(DisableVertexAttribArray)(i);
+}
+
+te_vertex_format_t* tea_vertex_format(te_void) {
+    te_vertex_format_t *format = (te_vertex_format_t*)malloc(sizeof *format);
+    TEA_ASSERT(format != NULL, "Cannot alloc memory for vertex format\n");
+    memset(format, 0, sizeof *format);
+    //format->handle = tea_vao();
+    return format;
+}
+
+te_void tea_free_vertex_format(te_vertex_format_t *format) {
+    if (!format)
+        return;
+    //tea_free_vao(&format->handle);
+    free(format);
+}
+
+te_void tea_begin_vertex_format(te_vertex_format_t *format) {
+    TEA_ASSERT(format != NULL, "Format cannot be NULL\n");
+    TEA_ASSERT(state()->vertex.format == NULL, "You must dettach the other vertex format first, use 'tea_end_vertex_format(te_vertex_format_t*)'\n");
+    //tea_bind_vao(format->handle);
+    //s_disable_vertex_format(format);
+    format->count = 0;
+    format->stride = 0;
+    state()->vertex.format = format;
+}
+
+te_void tea_vertex_format_add_attrib(te_enum tag) {
+    te_vertex_format_t *format = state()->vertex.format;
+    TEA_ASSERT(format != NULL, "You must attach an vertex format first, use 'tea_begin_vertex_format(te_vertex_format_t*)'\n");
+    TEA_ASSERT(format->count < TEA_MAX_ATTRIBS, "too many attributes");
+    te_attrib_t *attrib = &format->attribs[format->count];
+    attrib->tag = tag;
+    attrib->type = _attribInternal[tag].type;
+    attrib->size = _attribInternal[tag].size;
+    attrib->stride = _attribInternal[tag].stride;
+    attrib->offset = format->stride;
+
+    format->count++;
+    format->stride += attrib->stride;
+}
+
+te_void tea_end_vertex_format(te_vertex_format_t *format) {
+    TEA_ASSERT(format != NULL, "Format cannot be NULL\n");
+    state()->vertex.format = NULL;
+    //s_enable_vertex_format(format);
+    //tea_bind_vao(0);
+}
+
+/*=====================================*
+ *               Vertex                *
+ *=====================================*/
+
+te_vertex_t* tea_vertex(te_vertex_format_t *format, te_int vertices) {
+    te_vertex_t *vertex = (te_vertex_t*)malloc(sizeof(*vertex));
+    TEA_ASSERT(vertex != NULL, "Cannot alloc memory for te_vertex_t\n");
+    memset(vertex, 0, sizeof(*vertex));
+    format = format ? format : base()->format;
+    vertex->format = format;
+    vertex->vao = tea_vao();
+    vertex->vbo = tea_buffer();
+    vertex->size = (vertices * vertex->format->stride);
+    vertex->data = malloc(vertex->size);
+    te_vao_t vao = vertex->vao;
+    TEA_ASSERT(vertex->data != NULL, "Cannot alloc memory for vertex data\n");
+    tea_bind_vao(vao);
+    tea_bind_buffer(TEA_ARRAY_BUFFER, vertex->vbo);
+    s_enable_vertex_format(vertex->format);
+    tea_buffer_data(TEA_ARRAY_BUFFER, vertex->size, NULL, TEA_DYNAMIC_DRAW);
+    tea_bind_vao(0);
+    
+    return vertex;
+}
+
+te_void tea_free_vertex(te_vertex_t *vertex) {
+    if (!vertex)
+        return;
+
+    tea_free_vao(&vertex->vao);
+    tea_free_buffer(&vertex->vbo);
+    free(vertex);
+}
+
+te_void tea_begin_vertex(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    state()->vertex.ptr = vertex;
+    vertex->offset = 0;
+}
+
+te_void tea_end_vertex(te_vertex_t *vertex) {
+    tea_flush_vertex(vertex);
+    state()->vertex.ptr = &s_default_vertex;
+}
+
+te_void tea_flush_vertex(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    te_vertex_format_t *format = vertex->format;
+    tea_bind_buffer(TEA_ARRAY_BUFFER, vertex->vbo);
+    tea_buffer_subdata(TEA_ARRAY_BUFFER, 0, vertex->offset, vertex->data);
+    tea_bind_buffer(TEA_ARRAY_BUFFER, 0);
+}
+
+te_void tea_draw_vertex(te_vertex_t *vertex, te_enum mode) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    te_uint size = 0;
+    te_vertex_format_t *format = vertex->format;
+    if (format->stride != 0)
+        size = vertex->offset / format->stride;
+    te_vao_t vao = vertex->vao;
+    //fprintf(stderr, "vao: %d\n", vao);
+    //fprintf(stderr, "vbo: %d\n", vertex->vbo);
+    //te_float *data = vertex->data;
+    //printf("%f %f %f %f %f\n", data[0], data[1], data[2], data[3], data[4]);
+    tea_bind_vao(vao);
+    // tea_bind_buffer(TEA_ARRAY_BUFFER, vertex->vbo);
+    tea_draw_arrays(mode, 0, size);
+    tea_bind_vao(0);
+}
+
+te_void tea_draw_vertex_part(te_vertex_t *vertex, te_enum mode, te_int start, te_int size) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+
+}
+
+te_bool tea_vertex_is_empty(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    return vertex->offset == 0;
+}
+
+te_int tea_vertex_offset(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    return vertex->offset;
+}
+
+te_int tea_vertex_size(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    return vertex->size;
+}
+
+te_int tea_vertex_vertices(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    te_uint size = 0;
+    te_vertex_format_t *format = vertex->format;
+    if (format->stride != 0)
+        size = vertex->size / format->stride;
+    return size;
+}
+
+te_int tea_vertex_vertice_offset(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    te_uint size = 0;
+    te_vertex_format_t *format = vertex->format;
+    if (format->stride != 0)
+        size = vertex->offset / format->stride;
+    return size;
+}
+
+te_void tea_vertex_grow(te_vertex_t *vertex) {
+    TEA_ASSERT(vertex != NULL, "Vertex cannot be NULL");
+    vertex->size = vertex->size * 2;
+    vertex->data = realloc(vertex->data, vertex->size);
+}
 
 /*=====================================*
  *                Debug                *

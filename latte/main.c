@@ -21,7 +21,7 @@ int main(int argc, char ** argv) {
 
     la_vfs_t *vfs = la_vopen("teste.tar", LA_READ_MODE);
 
-    la_file_t *file = la_vfopen(vfs, "README.md");
+    la_file_t *file = la_vfopen(vfs, "teste/opa/vish");
 
     la_fheader(file, &h);
 
@@ -29,7 +29,7 @@ int main(int argc, char ** argv) {
     la_fread(file, out, h.size);
     out[h.size] = '\0';
     la_log("%s", out);
-
+    
     if (argv[1]) {
         if (la_isfile(argv[1])) {
             fp = la_fopen(argv[1], LA_READ_MODE);

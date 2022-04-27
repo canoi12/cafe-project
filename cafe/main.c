@@ -37,6 +37,7 @@ void update(float dt)
     */
     cafe_render_setTarget(target);
     cafe_render_setMode(CAFE_LINE);
+    cafe_render_clear(CAFE_RGB(0, 0, 0));
     cafe_render_triangle(x+32, y, x, y+32, x+64, y+32);
     cafe_render_rect(x+64, y, 8, 8);
     cafe_render_setTarget(NULL);
@@ -50,7 +51,7 @@ void update(float dt)
     dest.y = 0;
     dest.w = 320;
     dest.h = 190;
-    // cafe_render_texture(target, &dest, NULL);
+    cafe_render_texture(target, &dest, NULL);
 }
 
 int main(int argc, char **argv) {

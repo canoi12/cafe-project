@@ -28,7 +28,7 @@ build: $(OUT)
 
 all: $(SLIBNAME) $(DLIBNAME) $(OUT)
 
-$(OUT): $(MAIN) $(SLIBNAME) 
+$(OUT): $(MAIN) $(SLIBNAME) $(NAME).h
 	@echo "********************************************************"
 	@echo "** COMPILING $@"
 	@echo "********************************************************"

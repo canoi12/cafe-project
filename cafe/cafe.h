@@ -14,6 +14,10 @@
 
 #define CAFE_PI 3.14159
 
+#define CAFE_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define CAFE_MIN(a, b) ((a) < (b) ? (a) : (b))
+#define CAFE_CLAMP(x, min, max) (CAFE_MAX(min, CAFE_MIN(max, x)))
+
 typedef char ca_bool;
 typedef char ca_i8;
 typedef unsigned char ca_u8;

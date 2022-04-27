@@ -22,6 +22,7 @@ endif
 SRCS = $(NAME).c
 OBJS = $(SRCS:.c=.o)
 OUT = $(NAME)
+MAIN = main.c
 
 LIBNAME = lib$(NAME)
 SLIBNAME = $(LIBNAME).a
@@ -30,12 +31,12 @@ DLIBNAME = $(LIBNAME).so
 GFX_LIB = -lSDL2
 
 .PHONY: all build
-.SECONDARY: main.c $(NAME).c
+.SECONDARY: $(MAIN) $(NAME).c
 
 build: $(OUT)
 
-$(OUT): main.c $(SLIBNAME)
-	$(CC) main.c -o $(OUT) -L. -l$(NAME) $(CFLAGS) $(LDFLAGS) $(GFX_LIB)
+$(OUT): $(MAIN) $(SLIBNAME)
+	$(CC) $(MAIN) -o $(OUT) -L. -l$(NAME) $(CFLAGS) $(LDFLAGS) $(GFX_LIB)
 
 $(SLIBNAME): $(OBJS)
 	$(AR) rcs $(SLIBNAME) $(OBJS)

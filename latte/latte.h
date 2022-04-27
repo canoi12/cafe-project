@@ -177,15 +177,15 @@ LA_API int la_dlcall(la_lib_t *dl, const char *fn);
 LA_API int la_log_output(void *out);
 LA_API int la_log_(int mode, const char *file, int line, const char *function, const char *fmt, ...);
 
-#define la_log(msg...) la_log_(LA_LOG, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-#define la_warn(msg...) la_log_(LA_WARNING, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-#define la_error(msg...) la_log_(LA_ERROR, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-#define la_fatal(msg...) la_log_(LA_FATAL, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-#define la_trace(msg...) la_log_(LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
+#define la_log(...) la_log_(LA_LOG, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
+#define la_warn(...) la_log_(LA_WARNING, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
+#define la_error(...) la_log_(LA_ERROR, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
+#define la_fatal(...) la_log_(LA_FATAL, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
+#define la_trace(...) la_log_(LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
 
-#define la_traceerror(msg...) la_log_(LA_ERROR | LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-#define la_tracewarn(msg...) la_log_(LA_WARNING | LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-#define la_tracefatal(msg...) la_log_(LA_FATAL | LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
+#define la_traceerror(...) la_log_(LA_ERROR | LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
+#define la_tracewarn(...) la_log_(LA_WARNING | LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
+#define la_tracefatal(...) la_log_(LA_FATAL | LA_TRACE, __FILE__, __LINE__, __PRETTY_FUNCTION__, __VA_ARGS__)
 #endif /* LATTE _H */
 
 
@@ -210,7 +210,6 @@ LA_API int la_log_(int mode, const char *file, int line, const char *function, c
 
 /* POSIX header */
 struct la_posix_header_s {
-  struct {
     char name[100];       /* 0 */
     char mode[8];         /* 100 */
     char uid[8];          /* 108 */
@@ -228,7 +227,6 @@ struct la_posix_header_s {
     char devminor[8];     /* 337 */
     char prefix[155];     /* 345 */
     char _[12];           /* 500 */
-  };                      /* 512 */
 };
 
 typedef char la_block_t[512];
@@ -238,6 +236,7 @@ struct la_file_s {
     la_header_t h;
     int pos, offset;
     int mode;
+    la_vfs_t *vfs;
     union {
         FILE *stream;
         void *data;
@@ -749,25 +748,50 @@ int la_dread(la_dir_t *dir, la_header_t *out) {
  *        Virtual        *
  *************************/
 
-int _posix_to_la_header(la_posix_header_t *posh, la_header_t *out) {
-    if (!posh) {
+typedef struct {
+    la_posix_header_t h;
+    FILE *fp;
+} la_tar_t;
+
+int _posix_to_la_header(la_posix_header_t *in, la_header_t *out) {
+    if (!in) {
         la_error("posix header cannot be NULL");
         return 0;
     }
-    if (!out) return 0;
+    if (!out) {
+        la_error("header cannot be NULL");
+        return 0;
+    }
 
-    strcpy(out->name, posh->name);
-    strcpy(out->gname, posh->gname);
-    strcpy(out->uname, posh->uname);
-    out->size = strtol(posh->size, NULL, 8);
-    out->mode = strtol(posh->mode, NULL, 8);
-    out->gid = strtol(posh->gid, NULL, 10);
-    out->uid = strtol(posh->uid, NULL, 10);
+    strcpy(out->name, in->name);
+    strcpy(out->gname, in->gname);
+    strcpy(out->uname, in->uname);
+    out->size = strtol(in->size, NULL, 8);
+    out->mode = strtol(in->mode, NULL, 8);
+    out->gid = strtol(in->gid, NULL, 10);
+    out->uid = strtol(in->uid, NULL, 10);
+    out->mode = strtol(in->mode, NULL, 8);
     
     return 1;
 }
 
 int _la_header_to_posix(la_header_t *h, la_posix_header_t *out) {
+    if (!h) {
+        la_error("header cannot be NULL");
+        return 0;
+    }
+    if (!out) {
+        la_error("posix header cannot be NULL");
+        return 0;
+    }
+
+    strcpy(out->name, h->name);
+    strcpy(out->gname, h->gname);
+    strcpy(out->uname, h->uname);
+    sprintf(out->size, "%.8o", h->size);
+    sprintf(out->mode, "%.8o", h->mode);
+    sprintf(out->gid, "%.10o", h->gid);
+    sprintf(out->uid, "%.10o", h->uid);
 
     return 1;
 }
@@ -782,16 +806,36 @@ la_node_t* la_node_create(int type) {
     return node;
 }
 
-int la_node_exists(la_node_t *node, const char *name) {
-    if (!node) return 0;
-    if (!name) return 0;
+int la_node_exists(la_node_t *root, const char *filename) {
+    if (!root) return 0;
+    if (!filename) return 0;
 
-    la_node_t *aux = node;
+    char *p = filename;
+    if (*p == '.' && *(p + 1) == '/') p += 2;
+
+    int node_type = LA_TREG;
+    int len = 0;
+    char *bar = strchr(p, '/');
+    if (bar) {
+        node_type = LA_TDIR;
+        len = bar - p;
+    } else {
+        len = strlen(p);
+        bar = p + (len - 1);
+    }
+
+    char name[len + 1];
+    strncpy(name, p, len);
+    name[len] = '\0';
+
+    la_node_t *aux = root;
     while (aux->next) {
-        char *p = node->fp.h.name;
-        if (*p == '.') p++;
-        if (*p == '/') p++;
-        if (!strcmp(p, name)) return 1;
+        char *p = aux->fp.h.name;
+        if (*p == '.' && p[1] == '/') p++;
+        if (!strcmp(p, name) && aux->type == node_type) {
+            if (*(bar + 1) == '\0') return 1;
+            else return la_node_exists(aux->child, bar + 1);
+        }
         aux = aux->next;
     }
 
@@ -816,6 +860,7 @@ la_vfs_t* la_vopen(const char *vhd, int mode) {
 
 
     la_file_t *stream = &drv->stream;
+
     int off = 0;
     la_node_t *curr = drv->root;
     int sz = 0;
@@ -894,8 +939,7 @@ la_file_t* la_vfopen(la_vfs_t *drv, const char *filename) {
 
     while (iter) {
         char *p = iter->fp.h.name;
-        if ( *p == '.' ) p++;
-        if ( *p == '/' ) p++;
+        if ( *p == '.' && p[1] == '/') p++;
         if (!strcmp(filename, p)) return &iter->fp;
         
         iter = iter->next;

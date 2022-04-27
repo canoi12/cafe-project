@@ -7,7 +7,7 @@ function cafe.load()
     x = 64
     y = 32
     tex = cafe.render.newTexture('penguin.jpg')
-    print(tex:getWidth(), tex:getHeight())
+    target = cafe.render.newTexture(160, 95)
 end
 
 function cafe.update(dt)
@@ -25,12 +25,19 @@ function cafe.update(dt)
 end
 
 function cafe.draw()
+    cafe.render.clear(0, 0, 0)
     cafe.render.setMode('line')
     cafe.render.rectangle(x, y, 64, 32)
     cafe.render.circle(32, 32, 16)
     
     cafe.render.setMode('fill')
     cafe.render.circle(64, 64, 32)
+    
+    cafe.render.setTarget(target)
+    -- cafe.render.clear(0, 0, 0)
+    -- cafe.render.rectangle(16, 16, 32, 16)
+    cafe.render.texture(tex, -192, -192)
+    cafe.render.setTarget()
 
-    -- cafe.render.texture(tex)
+    cafe.render.texture(target)
 end

@@ -156,6 +156,14 @@ static int l_cafe_render_setMode(lua_State *L) {
     return 0;
 }
 
+static int l_cafe_render_setTarget(lua_State *L) {
+    ca_Texture **tex = luaL_testudata(L, 1, TEXTURE_CLASS);
+    ca_Texture *ttex = NULL;
+    if (tex) ttex = *tex;
+    cafe_render_setTarget(ttex);
+    return 0;
+}
+
 static int l_cafe_render_setColor(lua_State *L) {
     ca_Color color = CAFE_RGB(0, 0, 0);
     ca_u8 colors[4] = {0, 0, 0, 255};
@@ -170,8 +178,16 @@ static int l_cafe_render_setColor(lua_State *L) {
 static int l_cafe_render_newTexture(lua_State *L) {
     ca_Texture **texture = (ca_Texture*)lua_newuserdata(L, sizeof *texture);
     luaL_setmetatable(L, TEXTURE_CLASS);
-    const char *path = luaL_checkstring(L, 1);
-    *texture = cafe_render_loadTexture(path);
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        const ca_i8 *path = luaL_checkstring(L, 1);
+        *texture = cafe_render_loadTexture(path);
+    } else if (lua_type(L, 1) == LUA_TNUMBER) {
+        ca_i32 width, height;
+        width = luaL_checknumber(L, 1);
+        height = luaL_checknumber(L, 2);
+
+        *texture = cafe_render_createTexture(width, height, NULL, CAFE_TEXTURE_TARGET);
+    }
     return 1;
 }
 
@@ -206,7 +222,14 @@ static int l_cafe_render_circle(lua_State *L) {
 
 static int l_cafe_render_texture(lua_State *L) {
     ca_Texture **tex = luaL_checkudata(L, 1, TEXTURE_CLASS);
-    cafe_render_texture(*tex, NULL, NULL);
+    ca_Rect dest, src;
+    ca_i32 width, height;
+    cafe_texture_getSize(*tex, &width, &height);
+    dest.x = luaL_optnumber(L, 2, 0);
+    dest.y = luaL_optnumber(L, 3, 0);
+    dest.w = width;
+    dest.h = height;
+    cafe_render_texture(*tex, &dest, NULL);
     return 0;
 }
 
@@ -214,7 +237,7 @@ int luaopen_render(lua_State *L) {
     luaL_Reg reg[] = {
         { "clear", l_cafe_render_clear },
         { "setMode", l_cafe_render_setMode },
-        // { "setTarget", l_cafe_render_setTarget },
+        { "setTarget", l_cafe_render_setTarget },
         // { "setShader", l_cafe_render_setShader },
         { "newTexture", l_cafe_render_newTexture },
         { "setColor", l_cafe_render_setColor },

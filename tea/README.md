@@ -4,83 +4,68 @@ OpenGL loader and simple immediate mode core versions
 
 ### using SDL2
 ```c
-#include <stdio.h>
 #include "tea.h"
 #include <SDL2/SDL.h>
-
-const char *vert =
-"#version 120\n"
-"attribute vec3 a_Position;\n"
-"attribute vec4 a_Color;\n"
-"varying vec4 v_Color;\n"
-"void main() {\n"
-"  gl_Position = vec4(a_Position, 1.0);\n"
-"  v_Color = a_Color;\n"
-"}\n";
-
-const char *frag =
-"#version 120\n"
-"varying vec4 v_Color;\n"
-"void main() {\n"
-"  gl_FragColor = v_Color;\n"
-"}\n";
+#include <SDL2/SDL_opengl.h>
+#include <stdio.h>
 
 int main(int argc, char **argv) {
-    SDL_Window *window;
-    SDL_GLContext context;
-    SDL_Event event;
-
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        printf("SDL_Init Error: %s\n", SDL_GetError());
         return 1;
     }
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-
-    window = SDL_CreateWindow("SDL2 OpenGL", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480, SDL_WINDOW_OPENGL);
+    SDL_Window *window = SDL_CreateWindow("Tea", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 380, SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (window == NULL) {
         printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
-        SDL_Quit();
         return 1;
     }
-
-    context = SDL_GL_CreateContext(window);
-    if (context == NULL) {
-        printf("SDL_GL_CreateContext Error: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
+    SDL_GLContext context = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, context);
-    SDL_GL_SetSwapInterval(1);
+    SDL_Event event;
+    tea_init(NULL);
 
-    te_config_t config = tea_config();
-    tea_init(&config);
+    te_buffer_t buffer = tea_buffer(TEA_VERTEX_BUFFER, 1000);
+    te_program_t prog = tea_program(NULL, NULL);
+    i32 world, modelview;
+    world = tea_program_uniform_location(prog, "u_World");
+    modelview = tea_program_uniform_location(prog, "u_ModelView");
 
-    te_shader_t shader = tea_shader(vert, frag);
-    while (event.type != SDL_QUIT) {
+    u8 pixels[] = {
+        255, 255, 255, 255
+    };
+    te_texture_t tex = tea_texture(TEA_RGBA, 1, 1, pixels, 0);
+
+    tea_matrix_mode(TEA_PERSPECTIVE);
+    tea_load_identity();
+    tea_ortho(0, 640, 380, 0, 0, 1);p
+    tea_matrix_mode(TEA_MODELVIEW);
+    tea_load_identity();
+
+    tea_setup_buffer(buffer);
+    tea_bind_texture(tex);
+
+    while(event.type != SDL_QUIT) {
         SDL_PollEvent(&event);
-        tea_clear_color(0.3f, 0.4f, 0.4f, 1.0f);
-        tea_clear();
+        tea_viewport(0, 0, 640, 380);
+        tea_clear(0.3f, 0.4f, 0.4f, 1.f);
+        tea_buffer_seek(buffer, 0);
+        tea_buffer_color4f(buffer, 1, 1, 1, 1);
 
-        tea_use_shader(shader);
-        tea_begin(TEA_TRIANGLES);
-        tea_color3f(1.f, 0.f, 0.f);
-        tea_vertex2f(-0.5f, -0.5f);
-        tea_color3f(0.f, 1.f, 0.f);
-        tea_vertex2f(0.5f, -0.5f);
-        tea_color3f(0.f, 0.f, 1.f);
-        tea_vertex2f(0.f, 0.5f);
-        tea_end();
-        tea_use_shader(0);
+        tea_use_program(prog);
+        tea_program_set_uniform_matrix4fv(world, 1, TEA_FALSE, tea_get_matrix(TEA_PERSPECTIVE));
+        tea_program_set_uniform_matrix4fv(modelview, 1, TEA_FALSE, tea_get_matrix(TEA_MODELVIEW));
+
+        tea_buffer_fill_rectangle(buffer, (vec2){32, 32}, (vec2){32, 128});
+        tea_buffer_flush(buffer);
+        tea_draw(TEA_FILL);
         SDL_GL_SwapWindow(window);
     }
 
     tea_quit();
-    SDL_GL_DeleteContext(context);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    return 0;
 }
 ```
 
@@ -90,22 +75,6 @@ int main(int argc, char **argv) {
 #include "tea.h"
 #include <GLFW/glfw3.h>
 
-const char *vert =
-"#version 120\n"
-"attribute vec3 a_Position;\n"
-"attribute vec4 a_Color;\n"
-"varying vec4 v_Color;\n"
-"void main() {\n"
-"  gl_Position = vec4(a_Position, 1.0);\n"
-"  v_Color = a_Color;\n"
-"}\n";
-
-const char *frag =
-"#version 120\n"
-"varying vec4 v_Color;\n"
-"void main() {\n"
-"  gl_FragColor = v_Color;\n"
-"}\n";
 
 int main(int argc, char **argv) {
     if (!glfwInit()) {
@@ -123,25 +92,42 @@ int main(int argc, char **argv) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    te_config_t config = tea_config();
-    tea_init(&config);
+    tea_init(NULL);
 
-    te_shader_t shader = tea_shader(vert, frag);
+    te_buffer_t buffer = tea_buffer(TEA_VERTEX_BUFFER, 1000);
+    te_program_t prog = tea_program(NULL, NULL);
+    i32 world, modelview;
+    world = tea_program_uniform_location(prog, "u_World");
+    modelview = tea_program_uniform_location(prog, "u_ModelView");
+
+    u8 pixels[] = {
+        255, 255, 255, 255
+    };
+    te_texture_t tex = tea_texture(TEA_RGBA, 1, 1, pixels, 0);
+
+    tea_matrix_mode(TEA_PERSPECTIVE);
+    tea_load_identity();
+    tea_ortho(0, 640, 380, 0, 0, 1);p
+    tea_matrix_mode(TEA_MODELVIEW);
+    tea_load_identity();
+
+    tea_setup_buffer(buffer);
+    tea_bind_texture(tex);
+
 
     while (!glfwWindowShouldClose(window)) {
-        tea_clear_color(0.3f, 0.4f, 0.4f, 1.0f);
-        tea_clear();
+        tea_viewport(0, 0, 640, 380);
+        tea_clear(0.3f, 0.4f, 0.4f, 1.f);
+        tea_buffer_seek(buffer, 0);
+        tea_buffer_color4f(buffer, 1, 1, 1, 1);
 
-        tea_use_shader(shader);
-        tea_begin(TEA_TRIANGLES);
-        tea_color3f(1.f, 0.f, 0.f);
-        tea_vertex2f(-0.5f, -0.5f);
-        tea_color3f(0.f, 1.f, 0.f);
-        tea_vertex2f(0.5f, -0.5f);
-        tea_color3f(0.f, 0.f, 1.f);
-        tea_vertex2f(0.f, 0.5f);
-        tea_end();
-        tea_use_shader(0);
+        tea_use_program(prog);
+        tea_program_set_uniform_matrix4fv(world, 1, TEA_FALSE, tea_get_matrix(TEA_PERSPECTIVE));
+        tea_program_set_uniform_matrix4fv(modelview, 1, TEA_FALSE, tea_get_matrix(TEA_MODELVIEW));
+
+        tea_buffer_fill_rectangle(buffer, (vec2){32, 32}, (vec2){32, 128});
+        tea_buffer_flush(buffer);
+        tea_draw(TEA_FILL);
 
         glfwSwapBuffers(window);
         glfwPollEvents();

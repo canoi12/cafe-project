@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
 
     tea_matrix_mode(TEA_PERSPECTIVE);
     tea_load_identity();
-    tea_ortho(0, 640, 380, 0, 0, 1);p
+    tea_ortho(0, 640, 380, 0, 0, 1);
     // tea_perspective(angle, aspect, 0.1, 500);
     tea_matrix_mode(TEA_MODELVIEW);
     tea_load_identity();

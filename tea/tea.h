@@ -39,10 +39,7 @@
 #define TEA_RGB(r, g, b) ((te_color_t){(r), (g), (b), 255})
 #define TEA_RGBA(r, g, b, a) ((te_color_t){(r), (g), (b), (a)})
 
-#define TEA_BATCH_POOL_SIZE 32
-#define TEA_COMMAND_POOL_SIZE 1024
-#define TEA_TEXTURE_POOL_SIZE 32
-#define TEA_SHADER_POOL_SIZE 8
+#define TEA_BUFFER_POOL_SIZE 32
 
 enum {
     TEA_TEXTURE_STATIC = 0,
@@ -67,6 +64,11 @@ enum {
     TEA_LINE = 0,
     TEA_FILL,
     TEA_FILL_QUAD,
+};
+
+enum {
+    TEA_VERTEX_BUFFER = 0,
+    TEA_INDEX_BUFFER
 };
 
 typedef unsigned char te_bool;
@@ -95,11 +97,11 @@ typedef f32 vec3[3];
 typedef f32 vec4[4];
 typedef f32 mat4[16];
 
-typedef u32 te_batch_t;
+typedef u32 te_buffer_t;
 typedef u32 te_texture_t;
-typedef u32 te_shader_t;
+typedef u32 te_program_t;
+typedef u32 te_framebuffer_t;
 
-typedef struct { u8 r, g, b, a; } te_color_t;
 typedef struct { f32 x, y, w, h; } te_rect_t;
 
 #if defined(__cplusplus)
@@ -112,14 +114,53 @@ TEAPI void tea_quit(void);
 TEAPI void tea_begin(void);
 TEAPI void tea_end(void);
 
-TEAPI void tea_clear(te_color_t color);
+TEAPI void tea_clear(f32 r, f32 g, f32 b, f32 a);
 
 TEAPI void tea_viewport(f32 x, f32 y, f32 width, f32 height);
 TEAPI void tea_scissor(f32 x, f32 y, f32 width, f32 height);
 
-TEAPI void tea_set_shader(te_shader_t shader);
-TEAPI void tea_set_texture(te_texture_t texture);
+TEAPI void tea_draw(i32 mode);
+TEAPI void tea_draw_interval(i32 mode, i32 start, i32 count);
 
+TEAPI void tea_setup_buffer(te_buffer_t buffer);
+
+/*=================================*
+ *             Buffer              *
+ *=================================*/
+
+TEAPI te_buffer_t tea_buffer(i32 target, u32 size);
+TEAPI void tea_buffer_free(te_buffer_t buffer);
+
+TEAPI void tea_bind_buffer(te_buffer_t buffer);
+TEAPI void tea_unbind_buffer(te_buffer_t buffer);
+
+TEAPI void tea_buffer_flush(te_buffer_t buffer);
+TEAPI void tea_buffer_grow(te_buffer_t buffer);
+
+TEAPI void tea_buffer_seek(te_buffer_t buffer, u32 offset);
+TEAPI u32 tea_buffer_tell(te_buffer_t buffer);
+
+TEAPI void tea_buffer_send_vertices(te_buffer_t buffer, u32 n, f32 *vertices);
+
+TEAPI void tea_buffer_vertex2f(te_buffer_t buffer, f32 x, f32 y);
+TEAPI void tea_buffer_color3f(te_buffer_t buffer, f32 r, f32 g, f32 b);
+TEAPI void tea_buffer_color4f(te_buffer_t buffer, f32 r, f32 g, f32 b, f32 a);
+TEAPI void tea_buffer_texcoord(te_buffer_t buffer, f32 u, f32 v);
+
+TEAPI void tea_buffer_point(te_buffer_t buffer, f32 x, f32 y);
+TEAPI void tea_buffer_line(te_buffer_t buffer, vec2 p0, vec2 p1);
+TEAPI void tea_buffer_line_rectangle(te_buffer_t buffer, vec2 pos, vec2 size);
+TEAPI void tea_buffer_fill_rectangle(te_buffer_t buffer, vec2 pos, vec2 size);
+TEAPI void tea_buffer_line_circle(te_buffer_t buffer, vec2 pos, f32 radius, u32 segments);
+TEAPI void tea_buffer_fill_circle(te_buffer_t buffer, vec2 pos, f32 radius, u32 segments);
+TEAPI void tea_buffer_line_triangle(te_buffer_t buffer, vec2 p0, vec2 p1, vec2 p2);
+TEAPI void tea_buffer_fill_triangle(te_buffer_t buffer, vec2 p0, vec2 p1, vec2 p2);
+TEAPI void tea_buffer_line_quad(te_buffer_t buffer, vec2 p0, vec2 p1, vec2 p2, vec2 p3);
+TEAPI void tea_buffer_fill_quad(te_buffer_t buffer, vec2 p0, vec2 p1, vec2 p2, vec2 p3);
+TEAPI void tea_buffer_line_polygon(te_buffer_t b, i32 n, vec2 *points);
+// TEAPI void tea_buffer_fill_polygon(te_buffer_t *buffer, i32 n, vec2 *points);
+
+#if 0
 /*=================================*
  *             Batch               *
  *=================================*/
@@ -128,14 +169,18 @@ TEAPI te_batch_t tea_batch(u32 size);
 TEAPI void tea_batch_free(te_batch_t batch);
 
 TEAPI void tea_batch_flush(te_batch_t batch);
-TEAPI void tea_batch_draw(te_batch_t batch);
+TEAPI void tea_batch_draw(te_batch_t batch, i32 mode);
+TEAPI void tea_batch_draw_interval(te_batch_t batch, i32 mode, i32 start, i32 count);
 TEAPI void tea_batch_grow(te_batch_t batch);
 
-TEAPI void tea_batch_offset(te_batch_t batch, u32 offset);
+TEAPI void tea_batch_seek(te_batch_t batch, u32 offset);
 TEAPI u32 tea_batch_tell(te_batch_t batch);
 TEAPI void tea_batch_send_vertices(te_batch_t batch, u32 n, f32 *vertices);
 
-TEAPI void tea_batch_color(te_batch_t batch, te_color_t color);
+TEAPI void tea_batch_vertex2f(te_batch_t batch, f32 x, f32 y);
+TEAPI void tea_batch_color3f(te_batch_t batch, f32 r, f32 g, f32 b);
+TEAPI void tea_batch_color4f(te_batch_t batch, f32 r, f32 g, f32 b, f32 a);
+TEAPI void tea_batch_texcoord(te_batch_t batch, f32 u, f32 v);
 
 TEAPI void tea_batch_point(te_batch_t batch, f32 x, f32 y);
 TEAPI void tea_batch_line(te_batch_t batch, vec2 p0, vec2 p1);
@@ -147,13 +192,17 @@ TEAPI void tea_batch_line_triangle(te_batch_t batch, vec2 p0, vec2 p1, vec2 p2);
 TEAPI void tea_batch_fill_triangle(te_batch_t batch, vec2 p0, vec2 p1, vec2 p2);
 TEAPI void tea_batch_line_quad(te_batch_t batch, vec2 p0, vec2 p1, vec2 p2, vec2 p3);
 TEAPI void tea_batch_fill_quad(te_batch_t batch, vec2 p0, vec2 p1, vec2 p2, vec2 p3);
-
+TEAPI void tea_batch_line_polygon(te_batch_t b, i32 n, vec2 *points);
+// TEAPI void tea_batch_fill_polygon(te_batch_t *batch, i32 n, vec2 *points);
+#endif
 /*=================================*
  *             Texture             *
  *=================================*/
 
 TEAPI te_texture_t tea_texture(u8 format, i32 width, i32 height, const void *data, u8 type);
 TEAPI void tea_texture_free(te_texture_t tex);
+
+TEAPI void tea_bind_texture(te_texture_t tex);
 
 TEAPI void tea_texture_get_size(te_texture_t tex, vec2 out);
 
@@ -163,11 +212,20 @@ TEAPI void tea_texture_get_filter(te_texture_t tex, vec2 out);
 TEAPI void tea_texture_get_wrap(te_texture_t tex, vec2 out);
 
 /*=================================*
+ *           Framebuffer           *
+ *=================================*/
+
+TEAPI te_framebuffer_t tea_framebuffer(te_texture_t tex);
+TEAPI void tea_framebuffer_free(te_framebuffer_t fbo);
+
+TEAPI void tea_bind_framebuffer(te_framebuffer_t fbo);
+
+/*=================================*
  *             Matrix              *
  *=================================*/
 
 TEAPI void tea_matrix_mode(u8 mode);
-TEAPI f32* tea_get_matrix(u8 mode);
+TEAPI const f32* tea_get_matrix(u8 mode);
 TEAPI void tea_load_identity(void);
 TEAPI void tea_push_matrix(void);
 TEAPI void tea_push_matrix(void);
@@ -181,37 +239,40 @@ TEAPI void tea_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far
 TEAPI void tea_frustum(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far);
 TEAPI void tea_perspective(f32 fovy, f32 aspect, f32 near, f32 far);
 
-TEAPI void tea_translate(f32 x, f32 y, f32 z);
-TEAPI void tea_scale(f32 x, f32 y, f32 z);
-TEAPI void tea_rotate(f32 angle, f32 x, f32 y, f32 z);
-TEAPI void tea_rotate_z(f32 angle);
+TEAPI void tea_translatef(f32 x, f32 y, f32 z);
+TEAPI void tea_scalef(f32 x, f32 y, f32 z);
+TEAPI void tea_rotatef(f32 angle, f32 x, f32 y, f32 z);
+TEAPI void tea_rotatef_z(f32 angle);
 
 /*=================================*
- *             Shader              *
+ *             Program             *
  *=================================*/
 
-TEAPI te_shader_t tea_shader(const i8 *vert, const i8 *frag);
-TEAPI te_shader_t tea_shader_from_gl(i32 count, u32 *shaders);
-TEAPI void tea_shader_free(te_shader_t shader);
+TEAPI te_program_t tea_program(const i8 *vert, const i8 *frag);
+TEAPI te_program_t tea_simple_program(const i8 *position, const i8 *pixel);
+TEAPI te_program_t tea_program_from_gl(i32 count, u32 *programs);
+TEAPI void tea_program_free(te_program_t program);
 
-TEAPI i32 tea_shader_uniform_location(te_shader_t shader, const i8 *name);
+TEAPI void tea_use_program(te_program_t program);
+
+TEAPI i32 tea_program_uniform_location(te_program_t program, const i8 *name);
 
 #define TEA_UNIFORM_X(X, T)\
-TEAPI void tea_shader_set_uniform1##X(i32 location, T value);\
-TEAPI void tea_shader_set_uniform2##X(i32 location, T v0, T v1);\
-TEAPI void tea_shader_set_uniform3##X(i32 location, T v0, T v1, T v2);\
-TEAPI void tea_shader_set_uniform4##X(i32 location, T v0, T v1, T v2, T v3);\
-TEAPI void tea_shader_set_uniform1##X##v(i32 location, i32 val, const T *v);\
-TEAPI void tea_shader_set_uniform2##X##v(i32 location, i32 val, const T *v);\
-TEAPI void tea_shader_set_uniform3##X##v(i32 location, i32 val, const T *v);\
-TEAPI void tea_shader_set_uniform4##X##v(i32 location, i32 val, const T *v)
+TEAPI void tea_program_set_uniform1##X(i32 location, T value);\
+TEAPI void tea_program_set_uniform2##X(i32 location, T v0, T v1);\
+TEAPI void tea_program_set_uniform3##X(i32 location, T v0, T v1, T v2);\
+TEAPI void tea_program_set_uniform4##X(i32 location, T v0, T v1, T v2, T v3);\
+TEAPI void tea_program_set_uniform1##X##v(i32 location, i32 val, const T *v);\
+TEAPI void tea_program_set_uniform2##X##v(i32 location, i32 val, const T *v);\
+TEAPI void tea_program_set_uniform3##X##v(i32 location, i32 val, const T *v);\
+TEAPI void tea_program_set_uniform4##X##v(i32 location, i32 val, const T *v)
 
 TEA_UNIFORM_X(f, f32);
 TEA_UNIFORM_X(i, i32);
 
-TEAPI void tea_shader_set_uniform_matrix2fv(i32 location, i32 count, te_bool transpose, const mat4 m);
-TEAPI void tea_shader_set_uniform_matrix3fv(i32 location, i32 count, te_bool transpose, const mat4 m);
-TEAPI void tea_shader_set_uniform_matrix4fv(i32 location, i32 count, te_bool transpose, const mat4 m);
+TEAPI void tea_program_set_uniform_matrix2fv(i32 location, i32 count, te_bool transpose, const mat4 m);
+TEAPI void tea_program_set_uniform_matrix3fv(i32 location, i32 count, te_bool transpose, const mat4 m);
+TEAPI void tea_program_set_uniform_matrix4fv(i32 location, i32 count, te_bool transpose, const mat4 m);
 
 /*=================================*
  *              Debug              *

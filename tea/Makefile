@@ -2,6 +2,7 @@ CC = cc
 AR = ar
 CFLAGS = -Wall -std=c99 -O2 -g
 LDFLAGS = -lm
+RELEASE = 0
 
 NAME = tea
 
@@ -19,8 +20,13 @@ else
 	endif
 endif
 
-SRCS = $(NAME).c
-OBJS = $(SRCS:.c=.o)
+ifeq ($(RELEASE),1)
+	CFLAGS += -O2
+endif
+
+SRC = $(NAME).c
+OBJ = $(SRC:.c=.o)
+DOBJ = $(SRC:.c=.do)
 OUT = $(NAME)
 MAIN = main.c
 
@@ -28,21 +34,30 @@ LIBNAME = lib$(NAME)
 SLIBNAME = $(LIBNAME).a
 DLIBNAME = $(LIBNAME).so
 
-GFX_LIB = -lSDL2
+GFX_LIB = -lSDL2 
 
 .PHONY: all build
 .SECONDARY: $(MAIN) $(NAME).c
 
 build: $(OUT)
 
+all: $(SLIBNAME) $(DLIBNAME)
+
 $(OUT): $(MAIN) $(SLIBNAME)
 	$(CC) $(MAIN) -o $(OUT) -L. -l$(NAME) $(CFLAGS) $(LDFLAGS) $(GFX_LIB)
 
-$(SLIBNAME): $(OBJS)
-	$(AR) rcs $(SLIBNAME) $(OBJS)
+$(SLIBNAME): $(OBJ)
+	$(AR) rcs $(SLIBNAME) $(OBJ)
+
+$(DLIBNAME): $(DOBJ)
+	$(CC) -shared $^ -o $@ $(CFLAGS) $(LDFLAGS) $(GFX_LIB)
 
 %.o: %.c
 	$(CC) -c $< -o $@ $(CFLAGS)
 
+%.do: %.c
+	$(CC) -c $< -o $@ -fPIC $(CFLAGS)
+
 clean:
-	rm -f $(OBJS) $(NAME) $(SLIBNAME)
+	rm -f $(OBJ) $(DOBJ) $(OUT)
+	rm -f $(SLIBNAME) $(DLIBNAME)

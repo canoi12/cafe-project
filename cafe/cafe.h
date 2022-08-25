@@ -439,15 +439,16 @@ typedef ca_f32 ca_Vec3[3];
 typedef ca_f32 ca_Vec4[4];
 typedef ca_Vec4 ca_Mat4[4];
 
-typedef struct ca_Batch ca_Batch;
-typedef struct ca_Texture ca_Texture;
-typedef struct ca_Font ca_Font;
-typedef struct ca_Shader ca_Shader;
-typedef struct ca_Camera ca_Camera;
-typedef struct ca_DrawCall ca_DrawCall;
-
 typedef struct ca_Sound ca_Sound;
 typedef struct ca_Music ca_Music;
+typedef ca_u32 ca_SoundID;
+
+typedef struct ca_File ca_File;
+
+typedef struct ca_Image ca_Image;
+typedef struct ca_Canvas ca_Canvas;
+typedef struct ca_Font ca_Font;
+typedef struct ca_Shader ca_Shader;
 
 typedef struct ca_Joystick ca_Joystick;
 typedef struct ca_Gamepad ca_Gamepad;
@@ -470,8 +471,8 @@ CAFE_API void cafe_close(void);
 
 CAFE_API ca_bool cafe_is_running(void);
 
-CAFE_API void cafe_begin();
-CAFE_API void cafe_end();
+CAFE_API void cafe_begin(void);
+CAFE_API void cafe_end(void);
 
 CAFE_API void cafe_run(ca_StepFunction step);
 
@@ -483,6 +484,13 @@ CAFE_API void cafe_run(ca_StepFunction step);
  * Keyboard      *
  ****************/
 
+CAFE_API ca_i32 cafe_keyboard_from_name(const ca_i8* name);
+CAFE_API const ca_i8* cafe_keyboard_get_name(ca_i32 key);
+
+CAFE_API ca_bool cafe_keyboard_is_down(ca_i32 key);
+CAFE_API ca_bool cafe_keyboard_is_up(ca_i32 key);
+
+#if 0
 CAFE_API ca_i32 cafe_keyboard_fromName(const char* name);
 CAFE_API const char* cafe_keyboard_getName(ca_i32 key);
 
@@ -490,11 +498,18 @@ CAFE_API ca_bool cafe_keyboard_isDown(ca_i32 key);
 CAFE_API ca_bool cafe_keyboard_isUp(ca_i32 key);
 CAFE_API ca_bool cafe_keyboard_wasPressed(ca_i32 key);
 CAFE_API ca_bool cafe_keyboard_wasReleased(ca_i32 key);
-
+#endif
 /*****************
  * Mouse         *
  ****************/
 
+CAFE_API void cafe_mouse_get_pos(ca_f32* x, ca_f32* y);
+CAFE_API void cafe_mouse_set_pos(ca_f32 x, ca_f32 y);
+CAFE_API void cafe_mouse_get_delta_pos(ca_f32* x, ca_f32* y);
+
+CAFE_API ca_bool cafe_mouse_is_down(ca_i32 button);
+CAFE_API ca_bool cafe_mouse_is_up(ca_i32 button);
+#if 0
 CAFE_API void cafe_mouse_getPos(ca_f32* x, ca_f32* y);
 CAFE_API void cafe_mouse_setPos(ca_f32 x, ca_f32 y);
 CAFE_API void cafe_mouse_getDeltaPos(ca_f32* x, ca_f32* y);
@@ -503,6 +518,7 @@ CAFE_API ca_bool cafe_mouse_isDown(ca_i32 button);
 CAFE_API ca_bool cafe_mouse_isUp(ca_i32 button);
 CAFE_API ca_bool cafe_mouse_wasPressed(ca_i32 button);
 CAFE_API ca_bool cafe_mouse_wasReleased(ca_i32 button);
+#endif
 
 /*****************
  * Joystick      *
@@ -515,96 +531,144 @@ CAFE_API void cafe_close_joystick(ca_Joystick *joystick);
  * RENDER FUNCTIONS    *
  *=====================*/
 
-CAFE_API void cafe_render_clear(ca_Color color);
+// CAFE_API void cafe_render_clear(ca_Color color);
 
-CAFE_API void cafe_render_setMode(ca_i32 mode);
-CAFE_API void cafe_render_setShader(ca_Shader* shader);
-CAFE_API void cafe_render_setTarget(ca_Texture* tex);
-CAFE_API void cafe_render_setColor(ca_Color color);
+// CAFE_API void cafe_render_setMode(ca_i32 mode);
+// CAFE_API void cafe_render_setShader(ca_Shader* shader);
+// CAFE_API void cafe_render_setTarget(ca_Texture* tex);
+// CAFE_API void cafe_render_setColor(ca_Color color);
 
-CAFE_API void cafe_render_point(ca_f32 x, ca_f32 y);
-CAFE_API void cafe_render_line(ca_f32 x1, ca_f32 y1, ca_f32 x2, ca_f32 y2);
-CAFE_API void cafe_render_rect(ca_f32 x, ca_f32 y, ca_f32 w, ca_f32 h);
-CAFE_API void cafe_render_circle(ca_f32 x, ca_f32 y, ca_f32 radius);
-CAFE_API void cafe_render_triangle(ca_f32 x1, ca_f32 y1, ca_f32 x2, ca_f32 y2, ca_f32 x3, ca_f32 y3);
+CAFE_API void cafe_graphics_clear(ca_Color color);
 
-CAFE_API void cafe_render_texture(ca_Texture* tex, ca_Rect *dest, ca_Rect *src);
-CAFE_API void cafe_render_textureEx(ca_Texture* tex, ca_Rect *dest, ca_Rect *src, ca_f32 angle, ca_Vec2 center, ca_i32 flip);
+CAFE_API void cafe_graphics_draw_mode(ca_i32 mode);
+CAFE_API void cafe_graphics_set_shader(ca_Shader* shader);
+CAFE_API void cafe_graphics_set_canvas(ca_Canvas* canvas);
+CAFE_API void cafe_graphics_set_color(ca_Color color);
 
-CAFE_API void cafe_render_text(ca_Font* font, const char* text, ca_Rect *dest);
-CAFE_API void cafe_render_textEx(ca_Font* font, const char* text, ca_Rect *dest, ca_f32 angle, ca_Vec2 center, ca_i32 flip);
+CAFE_API void cafe_graphics_draw_point(ca_f32 x, ca_f32 y);
+CAFE_API void cafe_graphics_draw_line(ca_f32 x0, ca_f32 y0, ca_f32 x1, ca_f32 y1);
+CAFE_API void cafe_graphics_draw_rectangle(ca_f32 x, ca_f32 y, ca_f32 w, ca_f32 h);
+CAFE_API void cafe_graphics_draw_circle(ca_f32 x, ca_f32 y, ca_f32 radius);
+CAFE_API void cafe_graphics_draw_circle_ex(ca_f32 x, ca_f32 y, ca_f32 radius, ca_u32 segments);
+CAFE_API void cafe_graphics_draw_triangle(ca_f32 x0, ca_f32 y0, ca_f32 x1, ca_f32 y1, ca_f32 x2, ca_f32 y2);
 
-CAFE_API void cafe_render_batch(ca_Batch* batch);
+CAFE_API void cafe_graphics_draw_image(ca_Image *image, ca_Rect* dest, ca_Rect* src);
+CAFE_API void cafe_graphics_draw_image_ex(ca_Image *image, ca_Rect* dest, ca_Rect* src, ca_f32 angle, ca_i32 flip);
 
-CAFE_API void cafe_render_drawCall(ca_DrawCall *draw_call);
+CAFE_API void cafe_graphics_draw_canvas(ca_Canvas* canvas, ca_Rect* dest, ca_Rect* src);
+CAFE_API void cafe_graphics_draw_canvas_ex(ca_Canvas* canvas, ca_Rect* dest, ca_Rect* src, ca_f32 angle, ca_i32 flip);
+
+CAFE_API void cafe_graphics_print(ca_Font* font, const ca_i8* text, ca_f32 x, ca_f32 y);
+CAFE_API void cafe_graphics_print_ex(ca_Font* font, const ca_i8* text, ca_f32 x, ca_f32 y, ca_f32 angle);
+
+// CAFE_API void cafe_render_point(ca_f32 x, ca_f32 y);
+// CAFE_API void cafe_render_line(ca_f32 x1, ca_f32 y1, ca_f32 x2, ca_f32 y2);
+// CAFE_API void cafe_render_rect(ca_f32 x, ca_f32 y, ca_f32 w, ca_f32 h);
+// CAFE_API void cafe_render_circle(ca_f32 x, ca_f32 y, ca_f32 radius);
+// CAFE_API void cafe_render_triangle(ca_f32 x1, ca_f32 y1, ca_f32 x2, ca_f32 y2, ca_f32 x3, ca_f32 y3);
+
+// CAFE_API void cafe_render_texture(ca_Texture* tex, ca_Rect *dest, ca_Rect *src);
+// CAFE_API void cafe_render_textureEx(ca_Texture* tex, ca_Rect *dest, ca_Rect *src, ca_f32 angle, ca_Vec2 center, ca_i32 flip);
+
+// CAFE_API void cafe_render_text(ca_Font* font, const char* text, ca_Rect *dest);
+// CAFE_API void cafe_render_textEx(ca_Font* font, const char* text, ca_Rect *dest, ca_f32 angle, ca_Vec2 center, ca_i32 flip);
+
+// CAFE_API void cafe_render_batch(ca_Batch* batch);
+
+// CAFE_API void cafe_render_drawCall(ca_DrawCall *draw_call);
 
 /*****************
- * Texture       *
+ * Image         *
  ****************/
 
-CAFE_API ca_Texture* cafe_render_createTexture(ca_i32 width, ca_i32 height, ca_u8* data, ca_i32 usage);
-CAFE_API ca_Texture* cafe_render_loadTexture(const char* path);
+CAFE_API ca_Image* cafe_graphics_new_image(ca_i32 width, ca_i32 height, ca_u8 *data);
+CAFE_API ca_Image* cafe_graphics_load_image(const ca_i8* path);
+CAFE_API void cafe_image_destroy(ca_Image* image);
 
-CAFE_API void cafe_texture_destroy(ca_Texture* tex);
+CAFE_API void cafe_image_set_filter(ca_Image* image, ca_i32 filter_min, ca_i32 filter_mag);
+CAFE_API void cafe_image_set_wrap(ca_Image* image, ca_i32 wrap_s, ca_i32 wrap_t);
 
-CAFE_API void cafe_texture_setFilter(ca_Texture* tex, ca_i32 filter_min, ca_i32 filter_mag);
-CAFE_API void cafe_texture_setWrap(ca_Texture* tex, ca_i32 wrap_s, ca_i32 wrap_t);
-
-CAFE_API ca_i32 cafe_texture_getWidth(ca_Texture *tex);
-CAFE_API ca_i32 cafe_texture_getHeight(ca_Texture *tex);
-CAFE_API void cafe_texture_getSize(ca_Texture *tex, ca_i32 *width, ca_i32 *height);
+CAFE_API ca_i32 cafe_image_get_width(ca_Image* image);
+CAFE_API ca_i32 cafe_image_get_height(ca_Image* image);
+CAFE_API void cafe_image_get_size(ca_Image* image, ca_i32* width, ca_i32* height);
 
 /*****************
- * Batch         *
+ * Canvas        *
  ****************/
 
-CAFE_API ca_Batch* cafe_render_createBatch(ca_i32 capacity);
+CAFE_API ca_Canvas* cafe_graphics_new_canvas(ca_i32 width, ca_i32 height);
+CAFE_API void cafe_canvas_destroy(ca_Canvas* canvas);
 
-CAFE_API void cafe_batch_destroy(ca_Batch* batch);
-CAFE_API void cafe_batch_begin(ca_Batch* batch);
-CAFE_API void cafe_batch_end(ca_Batch* batch);
-CAFE_API void cafe_batch_flush(ca_Batch* batch);
+CAFE_API void cafe_canvas_set_filter(ca_Canvas* canvas, ca_i32 filter_min, ca_i32 filter_mag);
+CAFE_API void cafe_canvas_set_wrap(ca_Canvas* canvas, ca_i32 wrap_s, ca_i32 wrap_t);
 
-CAFE_API void cafe_batch_setColor(ca_Batch* batch, ca_Color color);
-CAFE_API void cafe_batch_setTexture(ca_Batch* batch, ca_Texture* texture);
+CAFE_API ca_i32 cafe_canvas_get_width(ca_Canvas* canvas);
+CAFE_API ca_i32 cafe_canvas_get_height(ca_Canvas* canvas);
+CAFE_API void cafe_canvas_get_size(ca_Canvas* canvas, ca_i32* width, ca_i32* height);
 
 /*****************
  * Font          *
  ****************/
 
-CAFE_API ca_Font* cafe_render_createFont(const char* path, ca_i32 size);
+CAFE_API ca_Font* cafe_graphics_load_font(const ca_i8* path, ca_i32 size);
 CAFE_API void cafe_font_destroy(ca_Font* font);
 
-CAFE_API ca_i32 cafe_font_getWidth(ca_Font* font, const char* text);
-CAFE_API ca_i32 cafe_font_getHeight(ca_Font* font);
+CAFE_API ca_i32 cafe_font_get_width(ca_Font* font, const ca_i8* text);
+CAFE_API ca_i32 cafe_font_get_height(ca_Font* font, const ca_i8* text);
+
+// CAFE_API ca_Font* cafe_render_createFont(const char* path, ca_i32 size);
+// CAFE_API void cafe_font_destroy(ca_Font* font);
+
+// CAFE_API ca_i32 cafe_font_getWidth(ca_Font* font, const char* text);
+// CAFE_API ca_i32 cafe_font_getHeight(ca_Font* font);
 
 /*****************
  * Shader        *
  ****************/
 
-CAFE_API ca_Shader* cafe_render_createShader(const char* vert, const char* frag);
+CAFE_API ca_Shader* cafe_graphics_new_shader(const ca_i8* vert, const ca_i8* frag);
 CAFE_API void cafe_shader_destroy(ca_Shader* shader);
 
-CAFE_API void cafe_shader_setUniform1i(ca_Shader* shader, const char* name, ca_i32 value);
-CAFE_API void cafe_shader_setUniform1f(ca_Shader* shader, const char* name, ca_f32 value);
-CAFE_API void cafe_shader_setUniform2f(ca_Shader* shader, const char* name, ca_f32 x, ca_f32 y);
-CAFE_API void cafe_shader_setUniform3f(ca_Shader* shader, const char* name, ca_f32 x, ca_f32 y, ca_f32 z);
-CAFE_API void cafe_shader_setUniform4f(ca_Shader* shader, const char* name, ca_f32 x, ca_f32 y, ca_f32 z, ca_f32 w);
-CAFE_API void cafe_shader_setUniformMat4(ca_Shader* shader, const char* name, ca_Mat4* mat);
+CAFE_API void cafe_shader_set_uniform1i(ca_Shader* shader, const ca_i8* name, ca_i32 value);
+CAFE_API void cafe_shader_set_uniform1f(ca_Shader* shader, const ca_i8* name, ca_f32 value);
+CAFE_API void cafe_shader_set_uniform2f(ca_Shader* shader, const ca_i8* name, ca_f32 v0, ca_f32 v1);
+CAFE_API void cafe_shader_set_uniform3f(ca_Shader* shader, const ca_i8* name, ca_f32 v0, ca_f32 v1, ca_f32 v2);
+CAFE_API void cafe_shader_set_uniform4f(ca_Shader* shader, const ca_i8* name, ca_f32 v0, ca_f32 v1, ca_f32 v2, ca_f32 v3);
+CAFE_API void cafe_shader_set_uniform_mat4(ca_Shader* shader, const ca_i8* name, ca_Mat4 mat);
+
+// CAFE_API ca_Shader* cafe_render_createShader(const char* vert, const char* frag);
+// CAFE_API void cafe_shader_destroy(ca_Shader* shader);
+
+// CAFE_API void cafe_shader_setUniform1i(ca_Shader* shader, const char* name, ca_i32 value);
+// CAFE_API void cafe_shader_setUniform1f(ca_Shader* shader, const char* name, ca_f32 value);
+// CAFE_API void cafe_shader_setUniform2f(ca_Shader* shader, const char* name, ca_f32 x, ca_f32 y);
+// CAFE_API void cafe_shader_setUniform3f(ca_Shader* shader, const char* name, ca_f32 x, ca_f32 y, ca_f32 z);
+// CAFE_API void cafe_shader_setUniform4f(ca_Shader* shader, const char* name, ca_f32 x, ca_f32 y, ca_f32 z, ca_f32 w);
+// CAFE_API void cafe_shader_setUniformMat4(ca_Shader* shader, const char* name, ca_Mat4* mat);
 
 /*=====================*
  * WINDOW FUNCTIONS    *
  *=====================*/
 
-CAFE_API const char* cafe_window_getTitle(void);
-CAFE_API void cafe_window_setTitle(const char* title);
+CAFE_API const ca_i8* cafe_window_get_title(void);
+CAFE_API void cafe_window_set_title(const ca_i8* title);
 
-CAFE_API ca_i32 cafe_window_getWidth(void);
-CAFE_API ca_i32 cafe_window_getHeight(void);
-CAFE_API void cafe_window_getSize(ca_i32* width, ca_i32* height);
+CAFE_API ca_i32 cafe_window_get_width(void);
+CAFE_API ca_i32 cafe_window_get_height(void);
+CAFE_API void cafe_window_get_size(ca_i32* width, ca_i32* height);
 
-CAFE_API ca_bool cafe_window_isFullscreen(void);
-CAFE_API void cafe_window_setFullscreen(ca_bool fullscreen);
+CAFE_API ca_bool cafe_window_is_fullscreen(void);
+CAFE_API void cafe_window_set_fullscreen(ca_bool fullscreen);
+
+// CAFE_API const char* cafe_window_getTitle(void);
+// CAFE_API void cafe_window_setTitle(const char* title);
+
+// CAFE_API ca_i32 cafe_window_getWidth(void);
+// CAFE_API ca_i32 cafe_window_getHeight(void);
+// CAFE_API void cafe_window_getSize(ca_i32* width, ca_i32* height);
+
+// CAFE_API ca_bool cafe_window_isFullscreen(void);
+// CAFE_API void cafe_window_setFullscreen(ca_bool fullscreen);
 
 #if defined(__cplusplus)
 }

@@ -748,10 +748,10 @@ int la_dread(la_dir_t *dir, la_header_t *out) {
  *        Virtual        *
  *************************/
 
-typedef struct {
+struct la_tar_s {
     la_posix_header_t h;
     FILE *fp;
-} la_tar_t;
+};
 
 int _posix_to_la_header(la_posix_header_t *in, la_header_t *out) {
     if (!in) {

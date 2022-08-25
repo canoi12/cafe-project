@@ -37,11 +37,7 @@
 
 #define MATRIX(T) (&TEA()->matrix[(T)])
 #define MATRIX_TOP(T) (&TEA()->matrix[(T)].pool[TEA()->matrix[(T)].top])
-#define COMMAND(i) (&TEA()->command.pool[(i)])
-#define NEXT_COMMAND() (&TEA()->command.pool[TEA()->command.top++])
-#define BATCH(i) (&TEA()->batch.pool[(i)])
-#define TEXTURE(i) (&TEA()->texture.pool[(i)])
-#define SHADER(i) (&TEA()->shader.pool[(i)])
+#define BUFFER(i) (&TEA()->buffer.pool[(i)])
 
 #define TEA_GL_VERSION 0x1F02
 #define TEA_GL_SHADING_LANGUAGE_VERSION 0x8B8C
@@ -523,51 +519,23 @@ struct te_gl_s {
     void* procs[TEA_GL_PROC_COUNT];
 };
 
-struct data_s {
-    u32 index, size;
-    void *data;
-};
-
 typedef struct {
     u32 target;
     u32 handle;
     u32 index, size;
     void *data;
+    u8 used;
 } buffer_t;
 
-typedef struct {
-    u32 index, count;
-    void *data;
-    u8 used, flush;
-} batch_t;
-
-typedef struct {
-    u32 fbo;
-    u32 handle;
-    i32 width, height;
-    i8 filter[2];
-    i8 wrap[2];
-} texture_t;
-
-typedef struct {
-    u32 handle;
-    i32 world_uniform, modelview_uniform, texture_uniform;
-} shader_t;
-
-typedef struct {
-    u32 start, count;
-    texture_t *texture;
-    batch_t *batch;
-    u8 mode;
-} drawcall_t;
-
 struct te_state_s {
-    shader_t *shader;
-    texture_t *texture;
-    texture_t *target;
+    te_program_t program;
+    te_texture_t texture;
+    te_framebuffer_t fbo;
     te_rect_t clip, scissor;
-    te_color_t clear_color, draw_color;
-    f32 *projection, *modelview;
+    te_buffer_t vbo, ibo;
+    u32 vao;
+    // f32 *projection, *modelview;
+    f32* matrix;
     mat4 transform;
     u8 draw_mode;
 };
@@ -578,47 +546,6 @@ typedef struct {
     u8 index;
     mat4 stack[MATRIX_STACK_SIZE];
 } matrix_stack_t;
-
-typedef struct {
-    int type;
-    union {
-        shader_t *shader;
-        texture_t *texture;
-        te_rect_t *rect;
-        struct {
-            i8 mode;
-            u32 start, end;
-        } draw;
-        struct {
-            char mode;
-            mat4 m;
-        } matrix;
-        te_color_t color;
-        struct {
-            u32 src_func, dest_func;
-        } blend;
-    };
-} command_t;
-
-typedef int(*CommandFunc)(command_t *command);
-static int setup_commands(void);
-
-static int clear_command(command_t *command);
-static int set_shader_command(command_t *command);
-
-static int set_target_command(command_t *command) {
-    texture_t *target = command->texture;
-    // glBindFramebuffer(TEA_FRAMEBUFFER, target->fbo);
-    return 1;
-}
-
-static int set_texture_command(command_t *command) {
-    texture_t *texture = command->texture;
-    // glBindTexture(TEA_TEXTURE_2D, texture->handle);
-    return 1;
-}
-
-static CommandFunc commands[MAX_COMMANDS];
 
 #define POOL(type, size)\
 struct {\
@@ -634,11 +561,13 @@ struct Tea {
     struct te_gl_s gl;
     struct te_state_s state;
 
+    i32 matrix_mode;
     POOL(mat4, MATRIX_STACK_SIZE) matrix[2];
-    POOL(batch_t, TEA_BATCH_POOL_SIZE) batch;
-    POOL(command_t, TEA_COMMAND_POOL_SIZE) command;
-    POOL(texture_t, TEA_TEXTURE_POOL_SIZE) texture;
-    POOL(shader_t, TEA_SHADER_POOL_SIZE) shader;
+    POOL(buffer_t, TEA_BUFFER_POOL_SIZE) buffer;
+    // POOL(batch_t, TEA_BUFFER_POOL_SIZE) batch;
+    // POOL(command_t, TEA_COMMAND_POOL_SIZE) command;
+    // POOL(texture_t, TEA_TEXTURE_POOL_SIZE) texture;
+    // POOL(shader_t, TEA_SHADER_POOL_SIZE) shader;
 
     u32 current_command;
 };
@@ -650,20 +579,19 @@ typedef struct {
 } vertex_t;
 
 static Tea tea_ctx;
-static batch_t default_batch;
 
-static const char *s_150_vert_header =
-"#version 150\n"
+static const char *s_130_vert_header =
+"#version 130\n"
 "uniform mat4 u_World;\n"
 "uniform mat4 u_ModelView;\n"
-"in vec3 a_Position;\n"
+"in vec2 a_Position;\n"
 "in vec4 a_Color;\n"
 "in vec2 a_TexCoord;\n"
 "out vec4 v_Color;\n"
 "out vec2 v_TexCoord;\n";
 
-static const char *s_150_frag_header =
-"#version 150\n"
+static const char *s_130_frag_header =
+"#version 130\n"
 "in vec4 v_Color;\n"
 "in vec2 v_TexCoord;\n"
 "uniform sampler2D u_Texture;\n"
@@ -673,7 +601,7 @@ static const char *s_120_vert_header =
 "#version 120\n"
 "uniform mat4 u_World;\n"
 "uniform mat4 u_ModelView;\n"
-"attribute vec3 a_Position;\n"
+"attribute vec2 a_Position;\n"
 "attribute vec4 a_Color;\n"
 "attribute vec2 a_TexCoord;\n"
 "varying vec4 v_Color;\n"
@@ -688,8 +616,8 @@ static const char *s_120_frag_header =
 "#define texture texture2D\n";
 
 static const char *s_default_vert_function =
-"vec4 position(mat4 model_view, mat4 world, vec3 pos) {\n"
-"  return model_view * world * vec4(pos, 1.0);\n"
+"vec4 position(mat4 model_view, mat4 world, vec2 pos) {\n"
+"  return world * model_view * vec4(pos.x, pos.y, 0.0, 1.0);\n"
 "}\n";
 
 static const char *s_default_frag_function =
@@ -715,6 +643,7 @@ static te_bool s_load_gl(void);
 static void s_setup_gl(void);
 static void s_close_gl(void);
 
+#if 0
 static int batch_init(batch_t *batch, u32 size);
 static int batch_deinit(batch_t *batch);
 static int batch_destroy(batch_t *batch);
@@ -733,21 +662,17 @@ static void buffer_add_data(buffer_t *b, u32 size, const void *data);
 static void buffer_add_vertices(buffer_t *b, u32 n, const f32 *vertices);
 static void buffer_add_indices(buffer_t *b, u32 n, const u32 *indices);
 static void buffer_add_batch(buffer_t *b, batch_t *batch);
+#endif
 
-static command_t* draw_command(u32 type) {
-    if (default_batch.index == 0) return NULL;
-    command_t *c = NEXT_COMMAND();
-    c->type = type;
-    u32 start = TEA()->vertex_buffer->index;
-    buffer_add_batch(TEA()->vertex_buffer, &default_batch);
-    c->draw.start = start;
-    c->draw.end = TEA()->vertex_buffer->index;
-    c->draw.mode = STATE()->draw_mode;
-    default_batch.index = 0;
+static int buffer_init(buffer_t *buffer, i32 target, u32 size);
+static int buffer_deinit(buffer_t *buffer);
+static int buffer_destroy(buffer_t *buffer);
 
-    return c;
-}
-
+i32 gl_modes[] = {
+    [TEA_LINE] = TEA_GL_LINES,
+    [TEA_FILL] = TEA_GL_TRIANGLES,
+    [TEA_FILL_QUAD] = TEA_GL_TRIANGLES
+};
 
 #define DEFAULT_BUFFER_SIZE 1000
 
@@ -758,77 +683,334 @@ int tea_init(te_config_t *config) {
         s_close_gl();
     } else
         TEA_ASSERT(0, "failed to initialize OpenGL");
-    TEA()->vertex_buffer = create_buffer(TEA_GL_ARRAY_BUFFER, DEFAULT_BUFFER_SIZE * 9 * sizeof(f32));
-    TEA()->index_buffer = create_buffer(TEA_GL_ELEMENT_ARRAY_BUFFER, DEFAULT_BUFFER_SIZE * sizeof(u32));
-    setup_commands();
+
+    CALL_GL(GenVertexArrays)(1, &STATE()->vao);
+    // TEA()->vertex_buffer = create_buffer(TEA_GL_ARRAY_BUFFER, DEFAULT_BUFFER_SIZE * 9 * sizeof(f32));
+    // TEA()->index_buffer = create_buffer(TEA_GL_ELEMENT_ARRAY_BUFFER, DEFAULT_BUFFER_SIZE * sizeof(u32));
+    // setup_commands();
     // batch_init(&TEA()->buffers.vertex.batch, DEFAULT_BATCH_SIZE * 9 * sizeof(f32));
     // batch_init(&TEA()->buffers.index.batch, DEFAULT_BATCH_SIZE * 6 * sizeof(u32));
-    command_t *command = COMMAND(0);
+    // command_t *command = COMMAND(0);
 
     return 1;
 }
 
 void tea_quit(void) {
-    destroy_buffer(TEA()->vertex_buffer);
-    destroy_buffer(TEA()->index_buffer);
-    batch_destroy(&default_batch);
-}
-
-void tea_begin(void) {
-    // batch_t *vbo_batch = &TEA()->buffers.vertex.batch;
-    // batch_t *ibo_batch = &TEA()->buffers.index.batch;
-
-    TEA()->vertex_buffer->index = TEA()->index_buffer->index = 0;
-    TEA()->command.top = 0;
-}
-
-void tea_end(void) {
-    for (int i = 0; i < TEA()->command.top; i++) {
-        command_t *command = COMMAND(i);
-        if (commands[command->type])
-            commands[command->type](command);
+    // destroy_buffer(TEA()->vertex_buffer);
+    // destroy_buffer(TEA()->index_buffer);
+    // batch_destroy(&default_batch);
+    for (i32 i = 0; i < TEA()->buffer.top; i++) {
+        buffer_t *b = BUFFER(i);
+        buffer_destroy(b);
     }
-    // glUseShader(0);
-    // glBindTexture(TEA_TEXTURE_2D, 0);
 }
 
-void tea_clear(te_color_t color) {
-    command_t *c = &TEA()->command.pool[TEA()->command.top++];
-    c->type = CLEAR_COMMAND;
-    memcpy(&c->color, &color, sizeof(te_color_t));
+void tea_clear(f32 r, f32 g, f32 b, f32 a) {
+    CALL_GL(ClearColor)(r, g, b, a);
+    CALL_GL(Clear)(TEA_GL_COLOR_BUFFER_BIT);
+    // command_t *c = &TEA()->command.pool[TEA()->command.top++];
+    // c->type = CLEAR_COMMAND;
+    // memcpy(&c->color, &color, sizeof(te_color_t));
 }
 
-void tea_draw_mode(u8 mode) {
-    u8 gl_mode = TEA_GL_LINES;
-    u32 c_type = VBO_DRAW_COMMAND;
-    if (mode != TEA_LINE) {
-        gl_mode = TEA_GL_TRIANGLES;
-        if (mode == TEA_FILL_QUAD) c_type = IBO_DRAW_COMMAND;
-    }
-    draw_command(c_type);
-    STATE()->draw_mode = gl_mode;
+void tea_draw(i32 mode) {
+    i32 gl_mode = gl_modes[mode];
+    if (STATE()->vbo == 0) return;
+    buffer_t *buf = BUFFER(STATE()->vbo - 1);
+    CALL_GL(BindVertexArray)(STATE()->vao);
+    CALL_GL(DrawArrays)(gl_mode, 0, buf->index / sizeof(vertex_t));
+    CALL_GL(BindVertexArray)(0);
 }
 
-void tea_set_shader(te_shader_t s) {
-    draw_command(VBO_DRAW_COMMAND);
-    shader_t *shader = SHADER(s-1);
-    command_t *c = NEXT_COMMAND();
-    c->type = SET_SHADER_COMMAND;
-    c->shader = shader;
+void tea_draw_interval(i32 mode, i32 start, i32 count) {
+    i32 gl_mode = gl_modes[mode];
+    CALL_GL(BindVertexArray)(STATE()->vao);
+    CALL_GL(DrawArrays)(gl_mode, start, count);
+    CALL_GL(BindVertexArray)(0);
 }
 
-void tea_set_texture(te_texture_t t) {
-    draw_command(VBO_DRAW_COMMAND);
-    texture_t *tex = TEXTURE(t - 1);
-    command_t *c = NEXT_COMMAND();
-    c->type = SET_TEXTURE_COMMAND;
-    c->texture = tex;
+void tea_setup_buffer(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    CALL_GL(BindVertexArray)(STATE()->vao);
+    tea_bind_buffer(b);
+    STATE()->vbo = b;
+    CALL_GL(EnableVertexAttribArray)(0);
+    CALL_GL(EnableVertexAttribArray)(1);
+    CALL_GL(EnableVertexAttribArray)(2);
+
+    CALL_GL(VertexAttribPointer)(0, 2, TEA_GL_FLOAT, TEA_FALSE, sizeof(vertex_t), (void*)0);
+    CALL_GL(VertexAttribPointer)(1, 4, TEA_GL_FLOAT, TEA_FALSE, sizeof(vertex_t), (void*)(2 * sizeof(f32)));
+    CALL_GL(VertexAttribPointer)(2, 2, TEA_GL_FLOAT, TEA_FALSE, sizeof(vertex_t), (void*)(6 * sizeof(f32)));
+    CALL_GL(BindVertexArray)(0);
+    tea_unbind_buffer(b);
 }
+
 
 /*=================================*
  *             Buffer              *
  *=================================*/
 
+i32 gl_target[] = {
+    TEA_GL_ARRAY_BUFFER,
+    TEA_GL_ELEMENT_ARRAY_BUFFER
+};
+
+int buffer_init(buffer_t *b, i32 target, u32 size) {
+    if (!size) return 0;
+    CALL_GL(GenBuffers)(1, &b->handle);
+    CALL_GL(BindBuffer)(gl_target[target], b->handle);
+    if (b->data) {
+        if (b->size > size) size = b->size;
+        b->data = TEA_REALLOC(b->data, size);
+    } else {
+        b->data = TEA_MALLOC(size);
+    }
+    b->size = size;
+    b->used = TEA_TRUE;
+    b->index = 0;
+    CALL_GL(BufferData)(gl_target[target], b->size, b->data, TEA_GL_DYNAMIC_DRAW);
+    CALL_GL(BindBuffer)(gl_target[target], 0);
+
+    return 1;
+}
+
+int buffer_deinit(buffer_t *b) {
+    if (!b->size || !b->data) return 0;
+    b->used = TEA_FALSE;
+    return 1;
+}
+
+int buffer_destroy(buffer_t *b) {
+    if (!b) return 0;
+    buffer_deinit(b);
+    if (b->data) TEA_FREE(b->data);
+
+    return 1;
+}
+
+buffer_t *get_free_buffer(u32 *index) {
+    for (u32 i = 0; i < TEA()->buffer.top; i++)
+        if (!BUFFER(i)->used) return BUFFER(i);
+    TEA_ASSERT(TEA()->buffer.top <= TEA_BUFFER_POOL_SIZE, "buffer limit reached (%d)", TEA_BUFFER_POOL_SIZE);
+    buffer_t *buffer = &TEA()->buffer.pool[TEA()->buffer.top++];
+    *index = TEA()->buffer.top;
+    return buffer;
+}
+
+te_buffer_t tea_buffer(i32 target, u32 size) {
+    TEA_ASSERT(size > 0, "Invalid buffer size");
+    u32 index = 0;
+    buffer_t *buf = get_free_buffer(&index);
+    buffer_init(buf, target, size);
+    return index;
+}
+
+void tea_buffer_free(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    buf->used = TEA_FALSE;
+}
+
+void tea_bind_buffer(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    CALL_GL(BindBuffer)(gl_target[buf->target], buf->handle);
+}
+
+void tea_unbind_buffer(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    CALL_GL(BindBuffer)(gl_target[buf->target], 0);
+}
+
+void tea_buffer_flush(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    i32 target = gl_target[buf->target];
+    CALL_GL(BindBuffer)(target, buf->handle);
+    /* vertex_t *v = buf->data;
+    for (i32 i = 0; i < 8; i++) {
+        TEA_LOG("%f %f %f %f %f %f %f %f", v->x, v->y, v->r, v->g, v->b, v->a, v->u, v->v);
+        v++;
+    } */
+    CALL_GL(BufferSubData)(target, 0, buf->index, buf->data);
+    CALL_GL(BindBuffer)(target, 0);
+}
+
+void tea_buffer_grow(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    buf->size *= 2;
+    buf->data = TEA_REALLOC(buf->data, buf->size);
+    i32 target = gl_target[buf->target];
+    CALL_GL(BindBuffer)(target, buf->handle);
+    CALL_GL(BufferData)(target, buf->size, buf->data, TEA_GL_DYNAMIC_DRAW);
+    CALL_GL(BindBuffer)(target, 0);
+}
+
+void tea_buffer_seek(te_buffer_t b, u32 offset) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    if (offset > buf->size) buf->index = buf->size;
+    else buf->index = offset;
+}
+
+u32 tea_buffer_tell(te_buffer_t b) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    return buf->index;
+}
+
+void tea_buffer_send_vertices(te_buffer_t b, u32 n, f32 *verts) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    i32 size = n * sizeof(vertex_t);
+    while (buf->index + size > buf->size) tea_buffer_grow(b);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    memcpy(cdata, verts, size);
+    buf->index += size;
+    vertex_t *data = (vertex_t*)(((u8*)buf->data) + buf->index);
+    memcpy(data, cdata, sizeof(vertex_t));
+}
+
+void tea_buffer_vertex2f(te_buffer_t b, f32 x, f32 y) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    vertex_t *data = cdata;
+    data->x = x;
+    data->y = y;
+    data++;
+    memcpy(data, cdata, sizeof(*data));
+    buf->index += sizeof(vertex_t);
+}
+
+void tea_buffer_color3f(te_buffer_t v, f32 r, f32 g, f32 b) {
+    TEA_ASSERT(v > 0 && v <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(v-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    cdata->r = r;
+    cdata->g = g;
+    cdata->b = b;
+}
+
+void tea_buffer_color4f(te_buffer_t v, f32 r, f32 g, f32 b, f32 a) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(v-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    cdata->r = r;
+    cdata->g = g;
+    cdata->b = b;
+    cdata->a = a;
+}
+
+void tea_buffer_texcoord(te_buffer_t b, f32 u, f32 v) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    cdata->u = u;
+    cdata->v = v;
+}
+
+void tea_buffer_point(te_buffer_t buffer, f32 x, f32 y) { tea_buffer_vertex2f(buffer, x, y); }
+void tea_buffer_line(te_buffer_t b, vec2 p0, vec2 p1) {
+    tea_buffer_vertex2f(b, p0[0], p0[1]);
+    tea_buffer_vertex2f(b, p1[0], p1[1]);
+}
+void tea_buffer_line_rectangle(te_buffer_t b, vec2 pos, vec2 size) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    f32 vertices[] = {
+        pos[0],         pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0]+size[0], pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+
+        pos[0]+size[0], pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0]+size[0], pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        
+        pos[0]+size[0], pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0],         pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        
+        pos[0],         pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0],         pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+    };
+    tea_buffer_send_vertices(b, 8, vertices);
+}
+void tea_buffer_fill_rectangle(te_buffer_t b, vec2 pos, vec2 size) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    f32 vertices[] = {
+        pos[0],         pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0]+size[0], pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0]+size[0], pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+
+        pos[0],         pos[1],         cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0],         pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        pos[0]+size[0], pos[1]+size[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+    };
+    tea_buffer_send_vertices(b, 6, vertices);
+}
+void tea_buffer_line_triangle(te_buffer_t b, vec2 p0, vec2 p1, vec2 p2) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    f32 vertices[] = {
+        p0[0], p0[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        p1[0], p1[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        
+        p1[0], p1[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        p2[0], p2[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+
+        p0[0], p0[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        p2[0], p2[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+    };
+    tea_buffer_send_vertices(b, 6, vertices);
+}
+
+void tea_buffer_fill_triangle(te_buffer_t b, vec2 p0, vec2 p1, vec2 p2) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid buffer");
+    buffer_t *buf = BUFFER(b-1);
+    vertex_t *cdata = (vertex_t*)(((u8*)buf->data) + buf->index);
+    // TEA_LOG("color: %f %f %f %f", cdata->r, cdata->g, cdata->b, cdata->a);
+    // TEA_LOG("texcoord: %f %f", cdata->u, cdata->v);
+    f32 vertices[] = {
+        p0[0], p0[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        p1[0], p1[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+        p2[0], p2[1], cdata->r, cdata->g, cdata->b, cdata->a, cdata->u, cdata->v,
+    };
+    tea_buffer_send_vertices(b, 3, vertices);
+}
+static const double pi2 = 2.0 * TEA_PI;
+void tea_buffer_line_circle(te_buffer_t b, vec2 pos, f32 radius, u32 s) {
+    i32 sides = s < 4 ? 4 : s;
+    i32 i;
+    f32 x, y;
+    x = pos[0];
+    y = pos[1];
+    for (i = 0; i < sides; i++) {
+        f32 tetha = (i * pi2) / sides;
+        tea_buffer_vertex2f(b, x + (cosf(tetha) * radius), y + (sinf(tetha) * radius));
+        tetha = ((i+1) * pi2) / sides;
+        tea_buffer_vertex2f(b, x + (cosf(tetha) * radius), y + (sinf(tetha) * radius));
+    }
+}
+
+void tea_buffer_fill_circle(te_buffer_t b, vec2 pos, f32 radius, u32 s) {
+    i32 sides = s < 4 ? 4 : s;
+    i32 i;
+    for (i = 0; i < sides; i++) {
+        f32 tetha = (i * pi2) / sides;
+        f32 tetha2 = ((i+1) * pi2) / sides;
+        vec2 p1, p2;
+        p1[0] = pos[0] + (cosf(tetha) * radius);
+        p1[1] = pos[1] + (sinf(tetha) * radius);
+        p2[0] = pos[0] + (cosf(tetha2) * radius);
+        p2[1] = pos[1] + (sinf(tetha2) * radius);
+        tea_buffer_fill_triangle(b, pos, p1, p2);
+    }
+}
+#if 0
 buffer_t *create_buffer(u32 target, u32 size) {
     if (!size) return NULL;
     buffer_t *buffer = TEA_MALLOC(sizeof *buffer);
@@ -964,7 +1146,7 @@ int batch_add_batch(batch_t *b, batch_t *other) {
 batch_t *get_free_batch(u32 *index) {
     for (u32 i = 0; i < TEA()->batch.top; i++)
         if (!BATCH(i)->used) return BATCH(i);
-    TEA_ASSERT(TEA()->batch.top <= TEA_BATCH_POOL_SIZE, "Batch limit reached (%d)", TEA_BATCH_POOL_SIZE);
+    TEA_ASSERT(TEA()->batch.top <= TEA_BUFFER_POOL_SIZE, "Batch limit reached (%d)", TEA_BUFFER_POOL_SIZE);
     batch_t *batch = &TEA()->batch.pool[TEA()->batch.top++];
     *index = TEA()->batch.top;
     return batch;
@@ -982,7 +1164,7 @@ te_batch_t tea_batch(u32 size) {
 }
 
 void tea_batch_free(te_batch_t b) {
-    TEA_ASSERT(b > 0 && b <= TEA_BATCH_POOL_SIZE, "Invalid batch");
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid batch");
     batch_t *batch = BATCH(b-1);
 
     batch->used = TEA_FALSE;
@@ -1000,19 +1182,96 @@ void tea_batch_fill_triangle(te_batch_t b, vec2 p0, vec2 p1, vec2 p2) {
 }
 
 void tea_batch_flush(te_batch_t b) {
-    TEA_ASSERT(b > 0 && b <= TEA_BATCH_POOL_SIZE, "Invalid batch");
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid batch");
+    batch_t *batch = BATCH(b-1);
+    CALL_GL(BufferSubData)(TEA_GL_ARRAY_BUFFER, 0, batch->index, batch->data);
 }
 
-void tea_batch_draw(te_batch_t b) {
-    TEA_ASSERT(b > 0 && b <= TEA_BATCH_POOL_SIZE, "Invalid batch");
-    draw_command(VBO_DRAW_COMMAND);
+void tea_batch_draw(te_batch_t b, i32 mode) {
+    TEA_ASSERT(b > 0 && b <= TEA_BUFFER_POOL_SIZE, "Invalid batch");
+    // draw_command(VBO_DRAW_COMMAND);
     batch_t *batch = BATCH(b-1);
-    batch_add_batch(&default_batch, batch);
-    draw_command(VBO_DRAW_COMMAND);
+    tea_batch_flush(b);
+    CALL_GL(DrawArrays)(gl_mode[mode], 0, batch->index / sizeof(vertex_t));
+    // batch_add_batch(&default_batch, batch);
+    // draw_command(VBO_DRAW_COMMAND);
+}
+#endif
+/*=================================*
+ *           Framebuffer           *
+ *=================================*/
+
+#define TEA_GL_FRAMEBUFFER 0x8D40
+#define TEA_GL_COLOR_ATTACHMENT0 0x8CE0
+#define TEA_GL_FRAMEBUFFER_COMPLETE 0x8CD5
+
+te_framebuffer_t tea_framebuffer(te_texture_t tex) {
+    if (!tex) {
+        fprintf(stderr, "Texture cannot be NULL\n");
+        return 0;
+    }
+    te_framebuffer_t fbo = 0;
+    CALL_GL(GenFramebuffers)(1, &fbo);
+    CALL_GL(BindFramebuffer)(TEA_GL_FRAMEBUFFER, fbo);
+    CALL_GL(FramebufferTexture2D)(TEA_GL_FRAMEBUFFER, TEA_GL_COLOR_ATTACHMENT0, TEA_GL_TEXTURE_2D, tex, 0);
+    u32 status = CALL_GL(CheckFramebufferStatus)(TEA_GL_FRAMEBUFFER);
+    if (status != TEA_GL_FRAMEBUFFER_COMPLETE) {
+        fprintf(stderr, "Failed to create framebuffer\n");
+        return 0;
+    }
+    CALL_GL(BindFramebuffer)(TEA_GL_FRAMEBUFFER, 0);
+    return fbo;
+}
+
+void tea_framebuffer_free(te_framebuffer_t fbo) {
+    if (!fbo) return;
+    CALL_GL(DeleteFramebuffers)(1, &fbo);
+}
+
+void tea_bind_framebuffer(te_framebuffer_t fbo) {
+    CALL_GL(BindFramebuffer)(TEA_GL_FRAMEBUFFER, fbo);
 }
 
 /*=================================*
- *             Shader              *
+ *             Texture             *
+ *=================================*/
+
+i32 tex_format[] = {
+    [TEA_ALPHA] = TEA_GL_RGBA,
+    [TEA_RED] = TEA_GL_RGB,
+    [TEA_RG] = TEA_GL_RGB,
+    [TEA_RGB] = TEA_GL_RGB,
+    [TEA_RGBA] = TEA_GL_RGBA
+};
+
+te_texture_t tea_texture(u8 format, i32 width, i32 height, const void *data, u8 type) {
+    te_texture_t tex;
+    i32 form = tex_format[format];
+    CALL_GL(GenTextures)(1, &tex);
+    CALL_GL(BindTexture)(TEA_GL_TEXTURE_2D, tex);
+
+    CALL_GL(TexImage2D)(TEA_GL_TEXTURE_2D, 0, form, width, height, 0, form, TEA_GL_UNSIGNED_BYTE, data);
+
+    CALL_GL(TexParameteri)(TEA_GL_TEXTURE_2D, TEA_GL_TEXTURE_MIN_FILTER, TEA_GL_NEAREST);
+    CALL_GL(TexParameteri)(TEA_GL_TEXTURE_2D, TEA_GL_TEXTURE_MAG_FILTER, TEA_GL_NEAREST);
+    
+    CALL_GL(TexParameteri)(TEA_GL_TEXTURE_2D, TEA_GL_TEXTURE_WRAP_S, TEA_GL_CLAMP_TO_EDGE);
+    CALL_GL(TexParameteri)(TEA_GL_TEXTURE_2D, TEA_GL_TEXTURE_WRAP_T, TEA_GL_CLAMP_TO_EDGE);
+
+    CALL_GL(BindTexture)(TEA_GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+void tea_texture_free(te_texture_t tex) {
+    CALL_GL(DeleteTextures)(TEA_GL_TEXTURE_2D, &tex);
+}
+
+void tea_bind_texture(te_texture_t tex) {
+    CALL_GL(BindTexture)(TEA_GL_TEXTURE_2D, tex);
+}
+
+/*=================================*
+ *             Program             *
  *=================================*/
 
 #define TEA_GL_FRAGMENT_SHADER 0x8B30
@@ -1040,44 +1299,44 @@ static u32 compile_gl_shader(u32 type, const i8 *src) {
     return shader;
 }
 
-int shader_init_from_gl(shader_t *shader, u32 n, u32 *shaders) {
+int s_program_init_from_gl(te_program_t *prog, u32 n, u32 *shaders) {
     TEA_ASSERT(n > 0, "Invalid shader count");
     TEA_ASSERT(shaders != NULL, "GL shaders cannot be NULL");
-    shader->handle = CALL_GL(CreateProgram)();
+    *prog = CALL_GL(CreateProgram)();
     for (i32 i = 0; i < n; i++)
-        CALL_GL(AttachShader)(shader->handle, shaders[i]);
+        CALL_GL(AttachShader)(*prog, shaders[i]);
     
-    CALL_GL(LinkProgram)(shader->handle);
+    CALL_GL(LinkProgram)(*prog);
     i32 status;
-    CALL_GL(GetProgramiv)(shader->handle, TEA_GL_LINK_STATUS, &status);
+    CALL_GL(GetProgramiv)(*prog, TEA_GL_LINK_STATUS, &status);
     if (status == 0) {
         i8 log[1024];
-        CALL_GL(GetProgramInfoLog)(shader->handle, 1024, NULL, log);
+        CALL_GL(GetProgramInfoLog)(*prog, 1024, NULL, log);
         TEA_ASSERT(0, "program link error: %s", log);
     }
-    shader->world_uniform = CALL_GL(GetUniformLocation)(shader->handle, "u_World");
-    shader->modelview_uniform = CALL_GL(GetUniformLocation)(shader->handle, "u_ModelView");
-    shader->texture_uniform = CALL_GL(GetUniformLocation)(shader->handle, "u_Texture");
+    // shader->world_uniform = CALL_GL(GetUniformLocation)(shader->handle, "u_World");
+    // shader->modelview_uniform = CALL_GL(GetUniformLocation)(shader->handle, "u_ModelView");
+    // shader->texture_uniform = CALL_GL(GetUniformLocation)(shader->handle, "u_Texture");
     return 1;
 }
 
-int shader_init(shader_t *shader, const i8 *vert, const i8 *frag) {
+static int s_program_init(te_program_t *prog, const i8 *vert, const i8 *frag) {
     vert = vert ? vert : s_default_vert_function;
     frag = frag ? frag : s_default_frag_function;
-    const i8 *vert_shader_strs[] = { s_120_vert_header, vert, s_vert_main };
-    const i8 *frag_shader_strs[] = { s_120_frag_header, frag, s_frag_main };
+    const i8* vert_shader_strs[] = { s_130_vert_header, vert, s_vert_main };
+    const i8* frag_shader_strs[] = { s_130_frag_header, frag, s_frag_main };
 
     i32 vert_len, frag_len;
     vert_len = frag_len = 0;
-    for (i8 i = 0; i < 3; i++) {
-        vert_len += strlen(vert_shader_strs[i]);
-        frag_len += strlen(frag_shader_strs[i]);
+    for (u8 i = 0; i < 3; i++) {
+        vert_len += strlen((const i8*)vert_shader_strs[i]);
+        frag_len += strlen((const i8*)frag_shader_strs[i]);
     }
 
     i8 vert_source[vert_len + 1];
     i8 frag_source[frag_len + 1];
     vert_source[0] = frag_source[0] = '\0';
-    for (i8 i = 0; i < 3; i++) {
+    for (u8 i = 0; i < 3; i++) {
         strcat(vert_source, (const i8*)vert_shader_strs[i]);
         strcat(frag_source, (const i8*)frag_shader_strs[i]);
     }
@@ -1086,46 +1345,58 @@ int shader_init(shader_t *shader, const i8 *vert, const i8 *frag) {
     u32 shaders[2];
     shaders[0] = compile_gl_shader(TEA_GL_VERTEX_SHADER, vert_source);
     shaders[1] = compile_gl_shader(TEA_GL_FRAGMENT_SHADER, frag_source);
-    shader_init_from_gl(shader, 2, shaders);
+    s_program_init_from_gl(prog, 2, shaders);
+    CALL_GL(DeleteShader)(shaders[0]);
+    CALL_GL(DeleteShader)(shaders[1]);
 
     return 1;
 }
 
-te_shader_t tea_shader(const i8 *vert, const i8 *frag) {
-    shader_t *shader = &TEA()->shader.pool[TEA()->shader.top++];
-    u32 index = TEA()->shader.top;
-    shader_init(shader, vert, frag);
-
-    return index;
+te_program_t tea_program(const i8 *vert, const i8 *frag) {
+    // shader_t *shader = &TEA()->shader.pool[TEA()->shader.top++];
+    // u32 index = TEA()->shader.top;
+    // shader_init(shader, vert, frag);
+    te_program_t prog;
+    s_program_init(&prog, vert, frag);
+    return prog;
 }
 
-i32 tea_shader_uniform_location(te_shader_t s, const i8 *name) {
-    shader_t *shader = SHADER(s - 1);
-    return CALL_GL(GetUniformLocation)(shader->handle, name);
+void tea_program_free(te_program_t program) {
+    if (!program) return;
+    CALL_GL(DeleteProgram)(program);
+}
+
+void tea_use_program(te_program_t s) {
+    CALL_GL(UseProgram)(s);
+}
+
+i32 tea_program_uniform_location(te_program_t s, const i8 *name) {
+    // shader_t *shader = SHADER(s - 1);
+    return CALL_GL(GetUniformLocation)(s, name);
 }
 
 #define TEA_UNIFORM_X_IMPL(X, T)\
-void tea_shader_set_uniform1##X(i32 l, T v) { CALL_GL(Uniform1##X)(l, v); }\
-void tea_shader_set_uniform2##X(i32 l, T v0, T v1) { CALL_GL(Uniform2##X)(l, v0, v1); }\
-void tea_shader_set_uniform3##X(i32 l, T v0, T v1, T v2) { CALL_GL(Uniform3##X)(l, v0, v1, v2); }\
-void tea_shader_set_uniform4##X(i32 l, T v0, T v1, T v2, T v3) { CALL_GL(Uniform4##X)(l, v0, v1, v2, v3); }\
-void tea_shader_set_uniform1##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform1##X##v)(l, val, v); }\
-void tea_shader_set_uniform2##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform2##X##v)(l, val, v); }\
-void tea_shader_set_uniform3##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform3##X##v)(l, val, v); }\
-void tea_shader_set_uniform4##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform4##X##v)(l, val, v); }
+void tea_program_set_uniform1##X(i32 l, T v) { CALL_GL(Uniform1##X)(l, v); }\
+void tea_program_set_uniform2##X(i32 l, T v0, T v1) { CALL_GL(Uniform2##X)(l, v0, v1); }\
+void tea_program_set_uniform3##X(i32 l, T v0, T v1, T v2) { CALL_GL(Uniform3##X)(l, v0, v1, v2); }\
+void tea_program_set_uniform4##X(i32 l, T v0, T v1, T v2, T v3) { CALL_GL(Uniform4##X)(l, v0, v1, v2, v3); }\
+void tea_program_set_uniform1##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform1##X##v)(l, val, v); }\
+void tea_program_set_uniform2##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform2##X##v)(l, val, v); }\
+void tea_program_set_uniform3##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform3##X##v)(l, val, v); }\
+void tea_program_set_uniform4##X##v(i32 l, i32 val, const T *v) { CALL_GL(Uniform4##X##v)(l, val, v); }
 
 TEA_UNIFORM_X_IMPL(f, f32)
 TEA_UNIFORM_X_IMPL(i, i32)
 
-void tea_shader_set_uniform_matrix2fv(i32 location, i32 count, te_bool transpose, const mat4 m) {
+void tea_program_set_uniform_matrix2fv(i32 location, i32 count, te_bool transpose, const mat4 m) {
     CALL_GL(UniformMatrix2fv)(location, count, transpose, m);
 }
 
-void tea_shader_set_uniform_matrix3fv(i32 location, i32 count, te_bool transpose, const mat4 m) {
+void tea_program_set_uniform_matrix3fv(i32 location, i32 count, te_bool transpose, const mat4 m) {
     CALL_GL(UniformMatrix3fv)(location, count, transpose, m);
 }
 
-void tea_shader_set_uniform_matrix4fv(i32 location, i32 count, te_bool transpose, const mat4 m) {
+void tea_program_set_uniform_matrix4fv(i32 location, i32 count, te_bool transpose, const mat4 m) {
     CALL_GL(UniformMatrix4fv)(location, count, transpose, m);
 }
 
@@ -1153,41 +1424,353 @@ void tea_abort(const i8 *fmt, ...) {
 }
 
 /*=================================*
- *            Command              *
+ *         Transformation          *
  *=================================*/
 
-int clear_command(command_t *command) {
-    te_color_t *c = &command->color;
-    CALL_GL(ClearColor)(c->r / 255.f, c->g / 255.f, c->b / 255.f, c->a / 255.f);
-    CALL_GL(Clear)(TEA_GL_COLOR_BUFFER_BIT);
+void tea_viewport(f32 x, f32 y, f32 w, f32 h) { CALL_GL(Viewport)(x, y, w, h); }
+void tea_matrix_mode(u8 mode) { CALL_GL(MatrixMode)(mode); }
+const f32* tea_get_matrix(u8 mode) {
+    // mode -= TEA_MODELVIEW;
+    // struct matrix_stack_s *stack = &TEA()->matrix.stack[mode];
+    // return stack->m[stack->top];
+    return (f32*)MATRIX_TOP(mode);
+}
+void tea_push_matrix(void) { CALL_GL(PushMatrix)(); }
+void tea_pop_matrix(void) { CALL_GL(PopMatrix)(); }
+void tea_load_identity(void) { CALL_GL(LoadIdentity)(); }
 
-    return 1;
+void tea_load_matrixf(const f32 *m) { CALL_GL(LoadMatrixf)(m); }
+void tea_load_transpose_matrixf(const f32 *m) { CALL_GL(LoadTransposeMatrixf)(m); }
+void tea_mult_matrixf(const f32 *m) { CALL_GL(MultMatrixf)(m); }
+void tea_mult_transpose_matrixf(const f32 *m) { CALL_GL(MultTransposeMatrixf)(m); }
+void tea_translatef(f32 x, f32 y, f32 z) { CALL_GL(Translatef)(x, y, z); }
+void tea_rotatef(f32 angle, f32 x, f32 y, f32 z) { CALL_GL(Rotatef)(angle, x, y, z); }
+void tea_scalef(f32 x, f32 y, f32 z) { CALL_GL(Scalef)(x, y, z); }
+void tea_orthof(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far) {
+    CALL_GL(Ortho)(left, right, bottom, top, near, far);
+}
+void tea_frustumf(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far) {
+    CALL_GL(Frustum)(left, right, bottom, top, near, far);
+}
+void tea_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far) {
+    CALL_GL(Ortho)(left, right, bottom, top, near, far);
 }
 
-int set_shader_command(command_t *command) {
-    shader_t *shader = command->shader;
-    CALL_GL(UseProgram)(shader->handle);
-    tea_shader_set_uniform_matrix4fv(shader->world_uniform, 1, TEA_FALSE, MATRIX_TOP(TEA_PERSPECTIVE));
-    mat4 modelview = {
-        1.f, 0.f, 0.f, 0.f,
-        0.f, 1.f, 0.f, 0.f,
-        0.f, 0.f, 1.f, 0.f,
+#if 0 // don't using double right now
+void tea_load_matrixd(const f64 *m) { CALL_GL(LoadMatrixd)(m); }
+void tea_load_transpose_matrixd(const f64 *m) { CALL_GL(LoadTransposeMatrixd)(m); }
+void tea_mult_matrixd(const f64 *m) { CALL_GL(MultMatrixd)(m); }
+void tea_mult_transpose_matrixd(const f64 *m) { CALL_GL(MultTransposeMatrixd)(m); }
+void tea_translated(f64 x, f64 y, f64 z) { CALL_GL(Translated)(x, y, z); }
+void tea_rotated(f64 angle, f64 x, f64 y, f64 z) { CALL_GL(Rotated)(angle, x, y, z); }
+void tea_scaled(f64 x, f64 y, f64 z) { CALL_GL(Scaled)(x, y, z); }
+#endif
+void tea_orthod(f64 left, f64 right, f64 bottom, f64 top, f64 near, f64 far) {
+    CALL_GL(Ortho)(left, right, bottom, top, near, far);
+}
+void tea_frustumd(f64 left, f64 right, f64 bottom, f64 top, f64 near, f64 far) {
+    CALL_GL(Frustum)(left, right, bottom, top, near, far);
+}
+void tea_perspective(f32 fovy, f32 aspect, f32 zNear, f32 zFar) {
+    f32 ymax = zNear * tan(fovy * TEA_PI / 360.0);
+    f32 ymin = -ymax;
+    f32 xmin = ymin * aspect;
+    f32 xmax = ymax * aspect;
+    tea_frustumf(xmin, xmax, ymin, ymax, zNear, zFar);
+}
+
+/**************
+ *  Internal  *
+ **************/
+
+#define CLONE_MATRIX(dest, src)\
+for (i = 0; i < 16; i++) dest[i] = src[i]
+
+#define TRANSPOSE_MATRIX(dest, src)\
+for (i = 0; i < 4; i++)\
+    for (j = 0; j < 4; j++)\
+        dest[i * 4 + j] = src[j * 4 + i]
+
+static void s_clone_matrixf(f32 *dest, const f32 *src) {
+    i32 i;
+    CLONE_MATRIX(dest, src);
+}
+
+static void s_transpose_matrixf(f32 *dest, const f32 *src) {
+    i32 i, j;
+    TRANSPOSE_MATRIX(dest, src);
+}
+
+static void s_mult_matrixf(f32 *dest, const f32 *a, const f32 *b) {
+    i32 i, j, k;
+    f32 tmp[16];
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 4; j++) {
+            tmp[i * 4 + j] = 0.f;
+            for (k = 0; k < 4; k++) {
+                tmp[i * 4 + j] += a[i * 4 + k] * b[k * 4 + j];
+            }
+        }
+    }
+    s_clone_matrixf(dest, tmp);
+}
+
+#if 0 // don't using double right now
+static void s_clone_matrixd(f64 *dest, const f64 *src) {
+    i32 i;
+    CLONE_MATRIX(dest, src);
+}
+
+static void s_transpose_matrixd(f64 *dest, const f64 *src) {
+    i32 i, j;
+    TRANSPOSE_MATRIX(dest, src);
+}
+
+static void s_mult_matrixd(f64 *dest, const f64 *a, const f64 *b) {
+    i32 i, j, k;
+    f64 tmp[16];
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 4; j++) {
+            tmp[i * 4 + j] = 0.0f;
+            for (k = 0; k < 4; k++) {
+                tmp[i * 4 + j] += a[i * 4 + k] * b[k * 4 + j];
+            }
+        }
+    }
+    s_clone_matrixd(dest, tmp);
+}
+#endif
+
+static void s_tea_matrix_mode(u32 mode) {
+    TEA_ASSERT(mode < 3, "Invalid matrix mode");
+    TEA()->matrix_mode = mode;
+    STATE()->matrix = (f32*)MATRIX_TOP(mode);
+    
+    // struct matrix_stack_s *stack = &TEA()->matrix.stack[m];
+    // TEA()->matrix.ptr = stack->m[stack->top];
+}
+
+static void s_tea_push_matrix(void) {
+    // struct matrix_stack_s *stack = &TEA()->matrix.stack[TEA()->matrix.mode - TEA_MODELVIEW];
+
+    i32 mode = TEA()->matrix_mode;
+    TEA_ASSERT(TEA()->matrix[mode].top < MATRIX_STACK_SIZE - 1, "Matrix stack overflow");
+    TEA()->matrix[mode].top++;
+    s_clone_matrixf((f32*)MATRIX_TOP(mode), STATE()->matrix);
+    STATE()->matrix = (f32*)MATRIX_TOP(mode);
+}
+
+static void s_tea_pop_matrix(void) {
+    i32 mode = TEA()->matrix_mode;
+    // struct matrix_stack_s *stack = &TEA()->matrix.stack[TEA()->matrix.mode - TEA_MODELVIEW];
+    TEA_ASSERT(TEA()->matrix[mode].top > 0, "Matrix stack underflow");
+    TEA()->matrix[mode].top--;
+    STATE()->matrix = (f32*)MATRIX_TOP(mode);
+}
+
+static void s_tea_load_identity(void) {
+    f32 *matrix = STATE()->matrix;
+    for (u8 i = 0; i < 16; i++)
+        matrix[i] = 0.f;
+    matrix[0] = 1.f;
+    matrix[5] = 1.f;
+    matrix[10] = 1.f;
+    matrix[15] = 1.f;
+}
+
+/* float */
+static void s_tea_load_matrixf(const f32 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    i32 i;
+    CLONE_MATRIX(STATE()->matrix, m);
+}
+
+static void s_tea_load_transpose_matrixf(const f32 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    i32 i, j;
+    TRANSPOSE_MATRIX(STATE()->matrix, m);
+}
+
+static void s_tea_mult_matrixf(const f32 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    f32 *ptr = STATE()->matrix;
+    s_mult_matrixf(ptr, m, ptr);
+}
+
+static void s_tea_mult_transpose_matrixf(const f32 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    f32 tmp[16];
+    s_transpose_matrixf(tmp, m);
+    s_mult_matrixf(STATE()->matrix, tmp, STATE()->matrix);
+}
+
+static void s_tea_translatef(f32 x, f32 y, f32 z) {
+    f32 m[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        x, y, z, 1.0f
+    };
+    s_tea_mult_matrixf(m);
+}
+
+static void s_tea_scalef(f32 x, f32 y, f32 z) {
+    f32 m[16] = {
+        x, 0.0f, 0.0f, 0.0f,
+        0.0f, y, 0.0f, 0.0f,
+        0.0f, 0.0f, z, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+    s_tea_mult_matrixf(m);
+}
+
+static void s_tea_rotatef(f32 angle, f32 x, f32 y, f32 z) {
+    f32 c = cosf(TEA_DEG2RAD(angle));
+    f32 s = sinf(TEA_DEG2RAD(angle));
+    f32 nc = 1.f - c;
+    f32 len = x*x + y*y + z*z;
+    if (len > 0.f) {
+        f32 rlen = 1.f / sqrtf(len);
+        x *= rlen;
+        y *= rlen;
+        z *= rlen;
+    }
+    f32 m[16] = {
+        x*x*nc + c,   y*x*nc + z*s, z*x*nc - y*s, 0.f,
+        x*y*nc - z*s, y*y*nc + c,   z*y*nc + x*s, 0.f,
+        x*z*nc + y*s, y*z*nc - x*s, z*z*nc + c,   0.f,
+        0.f,         0.f,         0.f,         1.f
+    };
+    s_mult_matrixf(STATE()->matrix, m, STATE()->matrix);
+}
+
+static void s_tea_orthof(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far) {
+    f32 *ptr = STATE()->matrix;
+    ptr[0] = 2.f / (right - left);
+    ptr[1] = 0.f;
+    ptr[2] = 0.f;
+    ptr[3] = 0.f;
+
+    ptr[4] = 0.f;
+    ptr[5] = 2.f / (top - bottom);
+    ptr[6] = 0.f;
+    ptr[7] = 0.f;
+
+    ptr[8] = 0.f;
+    ptr[9] = 0.f;
+    ptr[10] = -2.f / (far - near);
+    ptr[11] = 0.f;
+
+    ptr[12] = -(right + left) / (right - left);
+    ptr[13] = -(top + bottom) / (top - bottom);
+    ptr[14] = -(far + near) / (far - near);
+    ptr[15] = 1.f;
+}
+
+static void s_tea_frustumf(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far) {
+    f32 m[16];
+    f32 a = (right + left) / (right - left);
+    f32 b = (top + bottom) / (top - bottom);
+    f32 c = -(far + near) / (far - near);
+    f32 d = -(2.f * far * near) / (far - near);
+    m[0] = 2.f * near / (right - left);
+    m[1] = 0.f;
+    m[2] = 0.f;
+    m[3] = 0.f;
+
+    m[4] = 0.f;
+    m[5] = 2.f * near / (top - bottom);
+    m[6] = 0.f;
+    m[7] = 0.f;
+
+    m[8] = a;
+    m[9] = b;
+    m[10] = c;
+    m[11] = -1.f;
+
+    m[12] = 0.f;
+    m[13] = 0.f;
+    m[14] = d;
+    m[15] = 0.f;
+    s_tea_mult_matrixf(m);
+}
+
+#if 0 // don't using double right now
+/* double */
+static void s_tea_load_matrixd(const f64 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    i32 i;
+    CLONE_MATRIX(STATE()->matrix, (f32)m);
+}
+
+static void s_tea_load_transpose_matrixd(const f64 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    i32 i, j;
+    TRANSPOSE_MATRIX(STATE()->matrix, (f32)m);
+}
+
+static void s_tea_mult_matrixd(const f64 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    f32 *ptr = STATE()->matrix;
+    i32 i;
+    s_mult_matrixf(ptr, m, ptr);
+}
+
+static void s_tea_mult_transpose_matrixd(const f64 *m) {
+    TEA_ASSERT(m != NULL, "Invalid matrix");
+    f32 tmp[16];
+    i32 i, j;
+    TRANSPOSE_MATRIX(tmp, m);
+    s_mult_matrixf(STATE()->matrix, tmp, STATE()->matrix);
+}
+
+static void s_tea_translated(f64 x, f64 y, f64 z) {
+    f32 m[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        x, y, z, 1.0f
+    };
+    s_tea_mult_matrixf(m);
+}
+
+static void s_tea_scaled(f64 x, f64 y, f64 z) {
+    f32 m[16] = {
+        x, 0.f, 0.f, 0.f,
+        0.f, y, 0.f, 0.f,
+        0.f, 0.f, z, 0.f,
         0.f, 0.f, 0.f, 1.f
     };
-    tea_shader_set_uniform_matrix4fv(shader->modelview_uniform, 1, TEA_FALSE, MATRIX_TOP(TEA_MODELVIEW));
-    // glSetUniform(shader->world_uniform, TEA()->matrix.world)
-    // glSetUniform(shader->modelview_uniform, TEA()->matrix.modelview)
-    return 1;
+    s_tea_mult_matrixf(m);
 }
 
-int draw_vbo_command(command_t *command) {
-    
+static void s_tea_rotated(f64 angle, f64 x, f64 y, f64 z) {
+    f64 c = cos(TEA_DEG2RAD(angle));
+    f64 s = sin(TEA_DEG2RAD(angle));
+    f64 nc = 1.0 - c;
+    f64 len = x * x + y * y + z * z;
+    if (len > 0.0) {
+        f64 rlen = 1.f / sqrt(len);
+        x *= rlen;
+        y *= rlen;
+        z *= rlen;
+    }
+    f32 m[16] = {
+        x*x*nc + c,   y*x*nc + z*s, z*x*nc - y*s, 0.0,
+        x*y*nc - z*s, y*y*nc + c,   z*y*nc + x*s, 0.0,
+        x*z*nc + y*s, y*z*nc - x*s, z*z*nc + c,   0.0,
+        0.0,         0.0,         0.0,         1.0
+    };
+    s_mult_matrixf(STATE()->matrix, m, STATE()->matrix);
 }
 
-int setup_commands(void) {
-    commands[CLEAR_COMMAND] = clear_command;
-    commands[SET_SHADER_COMMAND] = set_shader_command;
-    commands[SET_TEXTURE_COMMAND] = set_texture_command;
+#endif
+static void s_tea_orthod(f64 left, f64 right, f64 bottom, f64 top, f64 near, f64 far) {
+    s_tea_orthof((f32)left, (f32)right, (f32)bottom, (f32)top, (f32)near, (f32)far);
+}
+
+static void s_tea_frustumd(f64 left, f64 right, f64 bottom, f64 top, f64 near, f64 far) {
+    s_tea_frustumf((f32)left, (f32)right, (f32)bottom, (f32)top, (f32)near, (f32)far);
 }
 
 /*=================================*
@@ -1276,9 +1859,12 @@ void s_setup_gl(void) {
         GL()->version.major = s_gl_max_ver.mag;
         GL()->version.minor = s_gl_max_ver.min;
     }
+    if (glsl == NULL) GL()->version.glsl = 100;
+    else
+        GL()->version.glsl = atof(glsl) * 100;
 
-    fprintf(stderr, "OpenGL version: %s\n", version);
-    fprintf(stderr, "OpenGL shading language version: %s\n", glsl);
+    fprintf(stderr, "OpenGL: %s\n", version);
+    fprintf(stderr, "OpenGL shading language: %s\n", glsl);
     static const te_proc_t glBaseProcs[] = {
         /* Miscellaneous */
         { TEA_GL_ClearColor, { "glClearColor", NULL }},
@@ -1453,8 +2039,6 @@ void s_setup_gl(void) {
 #endif
 
     if (GL()->extensions & TEA_HAS_SHADER) {
-        fprintf(stderr, "Using shader\n");
-#if 0
         GET_GL(MatrixMode) = s_tea_matrix_mode;
         GET_GL(PushMatrix) = s_tea_push_matrix;
         GET_GL(PopMatrix) = s_tea_pop_matrix;
@@ -1470,6 +2054,7 @@ void s_setup_gl(void) {
         GET_GL(Orthof) = s_tea_orthof;
         GET_GL(Frustumf) = s_tea_frustumf;
 
+#if 0 // don't using double right now
         GET_GL(LoadMatrixd) = s_tea_load_matrixd;
         GET_GL(LoadTransposeMatrixd) = s_tea_load_transpose_matrixd;
         GET_GL(MultMatrixd) = s_tea_mult_matrixd;
@@ -1477,10 +2062,10 @@ void s_setup_gl(void) {
         GET_GL(Translated) = s_tea_translated;
         GET_GL(Scaled) = s_tea_scaled;
         GET_GL(Rotated) = s_tea_rotated;
+#endif
 
         GET_GL(Ortho) = s_tea_orthod;
         GET_GL(Frustum) = s_tea_frustumd;
-#endif
     }
 }
 

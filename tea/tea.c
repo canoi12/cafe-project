@@ -772,7 +772,7 @@ te_vertex_format_t* tea_vertex_format(void) {
 
 void tea_free_vertex_format(te_vertex_format_t* format) {
 	if (!format) return;
-	free(format);
+	TEA_FREE(format);
 }
 
 static int attrib_stride[] = {
@@ -1314,7 +1314,7 @@ te_texture_t tea_texture(u8 format, i32 width, i32 height, const void *data, u8 
 }
 
 void tea_texture_free(te_texture_t tex) {
-    CALL_GL(DeleteTextures)(TEA_GL_TEXTURE_2D, &tex);
+    CALL_GL(DeleteTextures)(1, &tex);
 }
 
 void tea_bind_texture(te_texture_t tex) {

@@ -137,6 +137,7 @@ struct Render {
     ca_Canvas* canvas;
     ca_Shader* shader;
     ca_Font* font;
+    te_vertex_format_t* format;
     te_buffer_t vbo, ibo;
     ca_i32 draw_mode;
 
@@ -163,6 +164,7 @@ struct Cafe {
 static Cafe _cafe_ctx;
 
 static ca_bool s_cafe_render_init(Render* render);
+static void s_cafe_render_deinit(Render* render);
 static void s_cafe_render_draw(void);
 
 ca_Config cafe_config(const char* title, ca_i32 width, ca_i32 height)
@@ -223,6 +225,7 @@ ca_bool cafe_open(ca_Config* config) {
 }
 
 void cafe_close(void) {
+    s_cafe_render_deinit(render());
     tea_quit();
 }
 
@@ -398,7 +401,11 @@ ca_bool s_cafe_render_init(Render* render) {
     c->drawable.width = cafe()->window.width;
     c->drawable.height = cafe()->window.height;
 
-    tea_setup_buffer(render->vbo);
+    render->format = tea_vertex_format();
+    tea_vertex_format_add(render->format, TEA_ATTRIB_FLOAT2);
+    tea_vertex_format_add(render->format, TEA_ATTRIB_FLOAT4);
+    tea_vertex_format_add(render->format, TEA_ATTRIB_FLOAT2);
+    tea_setup_buffer(render->format, render->vbo);
 
     render->begin = s_render_begin;
     render->end = s_render_end;
@@ -407,6 +414,14 @@ ca_bool s_cafe_render_init(Render* render) {
     render->clear = s_render_clear;
 
     return CA_TRUE;
+}
+
+void s_cafe_render_deinit(Render* render) {
+    if (!render) return;
+    tea_buffer_free(render->defaults.vbo);
+    tea_free_vertex_format(render->format);
+    cafe_image_destroy(render->defaults.white);
+    cafe_shader_destroy(render->defaults.shader);
 }
 
 void cafe_graphics_clear(ca_Color color) {

@@ -43,7 +43,7 @@ else
 endif
 
 LDFLAGS += -L. -lcafe
-LDFLAGS += -lm -lSDL2 -ldl
+LDFLAGS += -lm -lpthread -lSDL2 -ldl
 
 .PHONY: all build
 

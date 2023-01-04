@@ -85,6 +85,14 @@ static const char *_frag_main =
 "  o_FragColor = pixel(v_Color, v_TexCoord, u_Texture);\n"
 "}\n";
 
+struct ca_Sound {
+    mo_audio_t* audio;
+};
+
+struct ca_Music {
+    mo_audio_t* audio;
+};
+
 struct Drawable {
     te_texture_t handle;
     ca_i32 width, height;
@@ -277,6 +285,100 @@ void cafe_run(ca_StepFunction step) {
         cafe_end();
     }
 }
+
+/*=====================*
+ * AUDIO FUNCTIONS     *
+ *=====================*/
+
+int cafe_audio_play(ca_Audio* audio) {
+    return mo_play_audio(audio);
+}
+
+void cafe_audio_stop_all(ca_Audio* audio) {
+    mo_audio_stop_all(audio);
+}
+
+void cafe_audio_pause_all(ca_Audio* audio) {
+    mo_audio_pause_all(audio);
+}
+
+
+int cafe_audio_is_any_playing(ca_Audio* audio) {
+    return mo_audio_is_any_playing(audio);
+}
+
+
+/******************
+ * Audio Instance *
+ ******************/
+
+void cafe_audio_play_instance(int id) {
+    mo_audio_instance_play(id);
+}
+
+void cafe_audio_stop_instance(int id) {
+    mo_audio_instance_stop(id);
+}
+
+void cafe_audio_pause_instance(int id) {
+    mo_audio_instance_pause(id);
+}
+
+void cafe_audio_set_instance_volume(int id, float volume) {
+    mo_audio_instance_set_volume(id, volume);
+}
+
+void cafe_audio_set_instance_loop(int id, int loop) {
+}
+
+
+/*****************
+ * Sound         *
+ *****************/
+ca_Sound* cafe_audio_load_sound(const char* filepath) {
+    if (!filepath) return NULL;
+    la_file_t* fp = la_fopen(filepath, LA_READ_MODE);
+    la_header_t h;
+    la_fheader(fp, &h);
+    void* data = malloc(h.size);
+    la_fread(fp, data, h.size);
+    ca_Sound* snd = mo_load_audio_from_memory(data, h.size, MO_AUDIO_STATIC);
+    la_fclose(fp);
+    return snd;
+}
+
+ca_Sound* cafe_audio_new_sound(void* data, int size) {
+    return mo_load_audio_from_memory(data, size, MO_AUDIO_STATIC);;
+}
+
+void cafe_sound_destroy(ca_Sound* sound) {
+    mo_destroy_audio(sound);
+}
+
+
+/*****************
+ * Music         *
+ *****************/
+ca_Music* cafe_audio_load_music(const char* filepath) {
+    if (!filepath) return NULL;
+    la_file_t* fp = la_fopen(filepath, LA_READ_MODE);
+    la_header_t h;
+    la_fheader(fp, &h);
+    void* data = malloc(h.size);
+    la_fread(fp, data, h.size);
+    ca_Music* msc = mo_load_audio_from_memory(data, h.size, MO_AUDIO_STREAM);
+    la_fclose(fp);
+    return msc;
+}
+
+ca_Music* cafe_audio_new_music(void* data, int size) {
+    return mo_load_audio_from_memory(data, size, MO_AUDIO_STREAM);
+}
+
+void cafe_music_destroy(ca_Music* music) {
+    mo_destroy_audio(music);
+}
+
 
 /*=====================*
  * INPUT FUNCTIONS      *

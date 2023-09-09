@@ -1,6 +1,0 @@
-latte
-*.txt
-*.a
-*.o
-.clangd
-compile_commands.json

@@ -9,7 +9,7 @@ TARGET ?= OSX
 
 LUA_FOLDER = external/lua
 
-MENU_BASE_DIR = ..
+MENU_BASE_DIR = menu
 
 MENU = tea latte coffee mocha
 MENU_FOLDERS = $(MENU:%=$(MENU_BASE_DIR)/%/)
@@ -19,7 +19,7 @@ INCLUDE = -I. -Iexternal -Iexternal/lua/src -I$(MENU_BASE_DIR)/mocha/external
 INCLUDE += $(addprefix -I,$(MENU_FOLDERS))
 
 # LUA_SRC = $(wildcard $(LUA_FOLDER)/src/*.c)
-SRC = cafe.c impl.c lua/l_cafe.c $(MENU_FILES:%=%.c) $(LUA_SRC)
+SRC = cafe.c impl.c $(MENU_FILES:%=%.c) $(LUA_SRC)
 # SRC += $(wildcard external/lua/src/*.c) 
 OBJS = $(SRC:.c=.o)
 OUT = $(NAME)
